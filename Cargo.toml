@@ -1,0 +1,29 @@
+[package]
+name = "websocket-util"
+version = "0.0.0"
+authors = ["Daniel Mueller <deso@posteo.net>"]
+edition = "2018"
+license = "GPL-3.0-or-later"
+homepage = "https://github.com/d-e-s-o/websocket-util"
+repository = "https://github.com/d-e-s-o/websocket-util.git"
+readme = "README.md"
+description = """
+A crate providing an easy to consume streaming interface for WebSocket
+data.
+"""
+
+[dependencies]
+futures = {version = "0.3", default-features = false}
+log = "0.4"
+serde = "1.0"
+serde_json = "1.0"
+tungstenite = {package = "async-tungstenite", version = "0.2", default-features = false}
+
+[dev-dependencies]
+async-std = "1.4"
+env_logger = {version = "0.7", default-features = false}
+serde = {version = "1.0", features = ["derive"]}
+test-env-log = "0.2"
+tokio = {version = "0.2", default-features = false, features = ["rt-core", "macros"]}
+tungstenite = {package = "async-tungstenite", version = "0.2", default-features = false, features = ["async_std_runtime"]}
+url = "2.0"
