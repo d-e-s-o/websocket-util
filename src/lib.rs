@@ -50,4 +50,8 @@
 
 mod stream;
 
+/// A module providing functionality for testing WebSocket streams.
+#[cfg(any(test, feature = "test"))]
+pub mod test;
+
 pub use stream::stream;

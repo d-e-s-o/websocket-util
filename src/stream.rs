@@ -133,13 +133,6 @@ mod tests {
   use super::*;
 
   use std::future::Future;
-  use std::net::SocketAddr;
-
-  use async_std::net::TcpListener;
-  use async_std::net::TcpStream;
-
-  use futures::FutureExt;
-  use futures::TryStreamExt;
 
   use serde::Deserialize;
   use serde::Serialize;
@@ -147,16 +140,12 @@ mod tests {
 
   use test_env_log::test;
 
-  use tokio::spawn;
-
-  use tungstenite::accept_async as accept_websocket;
   use tungstenite::connect_async;
-  use tungstenite::WebSocketStream as WsStream;
 
   use url::Url;
 
-
-  type WebSocketStream = WsStream<TcpStream>;
+  use crate::test::mock_server;
+  use crate::test::WebSocketStream;
 
 
   /// A dummy event used for testing.
@@ -169,31 +158,6 @@ mod tests {
     pub fn new(value: usize) -> Self {
       Self { value }
     }
-  }
-
-
-  /// Create a websocket server that handles a customizable set of
-  /// requests and exits.
-  async fn mock_server<F, R>(f: F) -> SocketAddr
-  where
-    F: Copy + FnOnce(WebSocketStream) -> R + Send + Sync + 'static,
-    R: Future<Output = Result<(), WebSocketError>> + Send + Sync + 'static,
-  {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-
-    let future = async move {
-      listener
-        .accept()
-        .map(move |result| result.unwrap())
-        .then(|(stream, _addr)| accept_websocket(stream))
-        .map(move |result| result.unwrap())
-        .then(move |ws_stream| f(ws_stream))
-        .await
-    };
-
-    let _ = spawn(future);
-    addr
   }
 
   async fn mock_stream<F, R>(
