@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use futures::future::ready;
-use futures::io::AsyncRead;
-use futures::io::AsyncWrite;
 use futures::stream::unfold;
+use futures::Sink;
 use futures::SinkExt;
 use futures::Stream;
 use futures::StreamExt;
@@ -18,7 +17,6 @@ use serde_json::Error as JsonError;
 
 use tungstenite::tungstenite::Error as WebSocketError;
 use tungstenite::tungstenite::Message;
-use tungstenite::WebSocketStream;
 
 
 #[derive(Debug)]
@@ -73,11 +71,10 @@ where
 }
 
 /// Handle a single message from the stream.
-async fn handle_msg<S, I>(
-  stream: &mut WebSocketStream<S>,
-) -> Result<Result<Operation<I>, JsonError>, WebSocketError>
+async fn handle_msg<S, I>(stream: &mut S) -> Result<Result<Operation<I>, JsonError>, WebSocketError>
 where
-  S: AsyncRead + AsyncWrite + Unpin,
+  S: Sink<Message, Error = WebSocketError>,
+  S: Stream<Item = Result<Message, WebSocketError>> + Unpin,
   I: DeserializeOwned,
 {
   // TODO: It is unclear whether a WebSocketError received at this
@@ -103,10 +100,11 @@ where
 /// Create a stream of higher level primitives out of a client, honoring
 /// and filtering websocket control messages such as `Ping` and `Close`.
 pub async fn stream<S, I>(
-  stream: WebSocketStream<S>,
+  stream: S,
 ) -> impl Stream<Item = Result<Result<I, JsonError>, WebSocketError>>
 where
-  S: AsyncRead + AsyncWrite + Unpin,
+  S: Sink<Message, Error = WebSocketError>,
+  S: Stream<Item = Result<Message, WebSocketError>> + Unpin,
   I: DeserializeOwned,
 {
   unfold((false, stream), |(closed, mut stream)| {
