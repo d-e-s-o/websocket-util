@@ -1,6 +1,8 @@
 // Copyright (C) 2019-2020 Daniel Mueller <deso@posteo.net>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::str::from_utf8;
+
 use futures::future::ready;
 use futures::stream::unfold;
 use futures::Sink;
@@ -9,11 +11,12 @@ use futures::Stream;
 use futures::StreamExt;
 use futures::TryStreamExt;
 
-use log::trace;
-
 use serde::de::DeserializeOwned;
 use serde_json::from_slice as from_json;
 use serde_json::Error as JsonError;
+
+use tracing::debug;
+use tracing::trace;
 
 use tungstenite::tungstenite::Error as WebSocketError;
 use tungstenite::tungstenite::Message;
@@ -56,12 +59,18 @@ where
   match msg {
     Message::Close(_) => Ok(Operation::Close),
     Message::Text(txt) => {
+      debug!(text = display(&txt));
       // TODO: Strictly speaking we would need to check that the
       //       stream is the expected one.
       let resp = from_json::<I>(txt.as_bytes())?;
       Ok(Operation::Decode(resp))
     },
     Message::Binary(dat) => {
+      match from_utf8(&dat) {
+        Ok(s) => debug!(data = display(&s)),
+        Err(b) => debug!(data = display(&b)),
+      }
+
       let resp = from_json::<I>(dat.as_slice())?;
       Ok(Operation::Decode(resp))
     },
@@ -85,7 +94,8 @@ where
     .ok_or_else(|| WebSocketError::Protocol("connection lost unexpectedly".into()))?;
   let msg = result?;
 
-  trace!("received message: {:?}", msg);
+  trace!(msg = debug(&msg));
+
   let result = decode_msg::<I>(msg);
   match result {
     Ok(Operation::Pong(dat)) => {
