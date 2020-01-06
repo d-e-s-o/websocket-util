@@ -1,4 +1,4 @@
-// Copyright (C) 2019 Daniel Mueller <deso@posteo.net>
+// Copyright (C) 2019-2020 Daniel Mueller <deso@posteo.net>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use futures::future::ready;
@@ -140,7 +140,7 @@ mod tests {
 
   use test_env_log::test;
 
-  use tungstenite::connect_async;
+  use tungstenite::tokio::connect_async;
 
   use url::Url;
 

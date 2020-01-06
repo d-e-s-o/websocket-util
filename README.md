@@ -5,6 +5,7 @@ websocket-util
 ==============
 
 - [Documentation][docs-rs]
+- [Changelog](CHANGELOG.md)
 
 A crate providing an easy to consume streaming interface for WebSocket
 data.
