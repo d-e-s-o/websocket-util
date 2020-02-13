@@ -28,29 +28,11 @@ use tungstenite::tungstenite::Error as WebSocketError;
 use tungstenite::tungstenite::Message;
 
 
-#[derive(Debug)]
-enum Operation<T> {
-  /// A value was decoded.
-  Decode(T),
-  /// We received a control message that we just ignore.
-  Nop,
-}
-
-impl<T> Operation<T> {
-  fn into_decoded(self) -> Option<T> {
-    match self {
-      Operation::Decode(dat) => Some(dat),
-      _ => None,
-    }
-  }
-}
-
-
 /// Handle a single message from the stream.
 async fn handle_msg<S, I>(
   result: Option<Result<Message, WebSocketError>>,
   stream: &mut S,
-) -> Result<(Result<Operation<I>, JsonError>, bool), WebSocketError>
+) -> Result<(Option<Result<I, JsonError>>, bool), WebSocketError>
 where
   S: Sink<Message, Error = WebSocketError> + Unpin,
   I: DeserializeOwned,
@@ -62,12 +44,12 @@ where
   trace!(msg = debug(&msg));
 
   match msg {
-    Message::Close(_) => Ok((Ok(Operation::Nop), true)),
+    Message::Close(_) => Ok((None, true)),
     Message::Text(txt) => {
       debug!(text = display(&txt));
       match from_json::<I>(txt.as_bytes()) {
-        Ok(resp) => Ok((Ok(Operation::Decode(resp)), false)),
-        Err(err) => return Ok((Err(err), false)),
+        Ok(resp) => Ok((Some(Ok(resp)), false)),
+        Err(err) => return Ok((Some(Err(err)), false)),
       }
     },
     Message::Binary(dat) => {
@@ -77,16 +59,16 @@ where
       }
 
       match from_json::<I>(dat.as_slice()) {
-        Ok(resp) => Ok((Ok(Operation::Decode(resp)), false)),
-        Err(err) => return Ok((Err(err), false)),
+        Ok(resp) => Ok((Some(Ok(resp)), false)),
+        Err(err) => return Ok((Some(Err(err)), false)),
       }
     },
     Message::Ping(dat) => {
       // TODO: We should probably spawn a task here.
       stream.send(Message::Pong(dat)).await?;
-      Ok((Ok(Operation::Nop), false))
+      Ok((None, false))
     },
-    Message::Pong(_) => Ok((Ok(Operation::Nop), false)),
+    Message::Pong(_) => Ok((None, false)),
   }
 }
 
@@ -151,7 +133,7 @@ where
       }
     }
   })
-  .try_filter_map(|(res, _)| ready(Ok(res.map(|op| op.into_decoded()).transpose())))
+  .try_filter_map(|(res, _)| ready(Ok(res)))
 }
 
 /// Create a stream of higher level primitives out of a client, honoring
