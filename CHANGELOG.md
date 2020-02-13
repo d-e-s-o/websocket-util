@@ -1,5 +1,5 @@
-Unreleased
-----------
+0.3.0
+-----
 - Added support for sending pings and evaluating pongs
 - Bumped `async-tungstenite` dependency to `0.4`
 
