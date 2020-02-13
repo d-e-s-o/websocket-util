@@ -28,6 +28,22 @@ use tungstenite::tungstenite::Error as WebSocketError;
 use tungstenite::tungstenite::Message;
 
 
+/// An enum encapsulating the state machine to handle pings to the
+/// server.
+#[derive(Clone, Copy, Debug)]
+enum Ping {
+  /// No ping is needed because we know the connection is still alive.
+  NotNeeded,
+  /// We haven't heard back from the server in a while and will issue a
+  /// ping next.
+  Needed,
+  /// A ping has been issued and is pending. If we subsequently get
+  /// woken up as part of our interval that means no pong was received
+  /// and the connection to the server is broken.
+  Pending,
+}
+
+
 /// Handle a single message from the stream.
 async fn handle_msg<S, I>(
   result: Option<Result<Message, WebSocketError>>,
@@ -81,7 +97,7 @@ where
   S: Stream<Item = Result<Message, WebSocketError>> + Unpin,
   I: DeserializeOwned,
 {
-  let mut pings = 0;
+  let mut ping = Ping::NotNeeded;
   let pinger = interval(ping_interval);
   let (sink, stream) = stream.split();
 
@@ -102,7 +118,10 @@ where
           let either = select(next_msg, next_ping).await;
           match either {
             Either::Left((result, _next)) => {
-              pings = 0;
+              // We just got a message from the server. Whatever it was,
+              // it means our connection is still standing, so no need
+              // to ask for a ping.
+              ping = Ping::NotNeeded;
 
               let result = handle_msg(result, &mut sink).await;
               let closed = result.as_ref().map(|(_, closed)| *closed).unwrap_or(false);
@@ -114,16 +133,21 @@ where
             Either::Right((_ping, next)) => {
               debug_assert!(_ping.is_some());
 
-              if pings > 2 {
-                let err = WebSocketError::Protocol("server failed to respond to pings".into());
-                break (Err(err), true)
-              }
-              let result = sink.send(Message::Ping(Vec::new())).await;
-              if let Err(err) = result {
-                break (Err(err), false)
-              }
+              ping = match ping {
+                Ping::NotNeeded => Ping::Needed,
+                Ping::Needed => {
+                  let result = sink.send(Message::Ping(Vec::new())).await;
+                  if let Err(err) = result {
+                    break (Err(err), false)
+                  }
+                  Ping::Pending
+                },
+                Ping::Pending => {
+                  let err = WebSocketError::Protocol("server failed to respond to pings".into());
+                  break (Err(err), true)
+                },
+              };
 
-              pings += 1;
               next_msg = next;
             },
           }
