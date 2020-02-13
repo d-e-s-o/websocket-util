@@ -32,14 +32,8 @@ use tungstenite::tungstenite::Message;
 enum Operation<T> {
   /// A value was decoded.
   Decode(T),
-  /// A ping was received and we are about to issue a pong.
-  Pong(Vec<u8>),
-  /// We received a response to our ping request.
-  Ping,
   /// We received a control message that we just ignore.
   Nop,
-  /// The connection is supposed to be close.
-  Close,
 }
 
 impl<T> Operation<T> {
@@ -49,49 +43,14 @@ impl<T> Operation<T> {
       _ => None,
     }
   }
-
-  fn is_close(&self) -> bool {
-    match self {
-      Operation::Close => true,
-      _ => false,
-    }
-  }
 }
 
-
-/// Convert a message into an `Operation`.
-fn decode_msg<I>(msg: Message) -> Result<Operation<I>, JsonError>
-where
-  I: DeserializeOwned,
-{
-  match msg {
-    Message::Close(_) => Ok(Operation::Close),
-    Message::Text(txt) => {
-      debug!(text = display(&txt));
-      // TODO: Strictly speaking we would need to check that the
-      //       stream is the expected one.
-      let resp = from_json::<I>(txt.as_bytes())?;
-      Ok(Operation::Decode(resp))
-    },
-    Message::Binary(dat) => {
-      match from_utf8(&dat) {
-        Ok(s) => debug!(data = display(&s)),
-        Err(b) => debug!(data = display(&b)),
-      }
-
-      let resp = from_json::<I>(dat.as_slice())?;
-      Ok(Operation::Decode(resp))
-    },
-    Message::Ping(dat) => Ok(Operation::Pong(dat)),
-    Message::Pong(_) => Ok(Operation::Ping),
-  }
-}
 
 /// Handle a single message from the stream.
 async fn handle_msg<S, I>(
   result: Option<Result<Message, WebSocketError>>,
   stream: &mut S,
-) -> Result<Result<Operation<I>, JsonError>, WebSocketError>
+) -> Result<(Result<Operation<I>, JsonError>, bool), WebSocketError>
 where
   S: Sink<Message, Error = WebSocketError> + Unpin,
   I: DeserializeOwned,
@@ -102,14 +61,32 @@ where
 
   trace!(msg = debug(&msg));
 
-  let result = decode_msg::<I>(msg);
-  match result {
-    Ok(Operation::Pong(dat)) => {
+  match msg {
+    Message::Close(_) => Ok((Ok(Operation::Nop), true)),
+    Message::Text(txt) => {
+      debug!(text = display(&txt));
+      match from_json::<I>(txt.as_bytes()) {
+        Ok(resp) => Ok((Ok(Operation::Decode(resp)), false)),
+        Err(err) => return Ok((Err(err), false)),
+      }
+    },
+    Message::Binary(dat) => {
+      match from_utf8(&dat) {
+        Ok(s) => debug!(data = display(&s)),
+        Err(b) => debug!(data = display(&b)),
+      }
+
+      match from_json::<I>(dat.as_slice()) {
+        Ok(resp) => Ok((Ok(Operation::Decode(resp)), false)),
+        Err(err) => return Ok((Err(err), false)),
+      }
+    },
+    Message::Ping(dat) => {
       // TODO: We should probably spawn a task here.
       stream.send(Message::Pong(dat)).await?;
-      Ok(Ok(Operation::Nop))
+      Ok((Ok(Operation::Nop), false))
     },
-    op => Ok(op),
+    Message::Pong(_) => Ok((Ok(Operation::Nop), false)),
   }
 }
 
@@ -143,15 +120,10 @@ where
           let either = select(next_msg, next_ping).await;
           match either {
             Either::Left((result, _next)) => {
+              pings = 0;
+
               let result = handle_msg(result, &mut sink).await;
-              let closed = match result.as_ref() {
-                Ok(Ok(Operation::Ping)) => {
-                  pings = 0;
-                  false
-                },
-                Ok(Ok(op)) => op.is_close(),
-                _ => false,
-              };
+              let closed = result.as_ref().map(|(_, closed)| *closed).unwrap_or(false);
               // Note that because we do nothing with `_next` we may
               // actually drop a ping. But we do not consider that
               // critical.
@@ -179,7 +151,7 @@ where
       }
     }
   })
-  .try_filter_map(|res| ready(Ok(res.map(|op| op.into_decoded()).transpose())))
+  .try_filter_map(|(res, _)| ready(Ok(res.map(|op| op.into_decoded()).transpose())))
 }
 
 /// Create a stream of higher level primitives out of a client, honoring
