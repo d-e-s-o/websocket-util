@@ -57,7 +57,7 @@ where
     result.ok_or_else(|| WebSocketError::Protocol("connection lost unexpectedly".into()))?;
   let msg = result?;
 
-  trace!(msg = debug(&msg));
+  trace!(recv_msg = debug(&msg));
 
   match msg {
     Message::Close(_) => Ok((None, true)),
@@ -80,8 +80,10 @@ where
       }
     },
     Message::Ping(dat) => {
+      let msg = Message::Pong(dat);
+      trace!(send_msg = debug(&msg));
       // TODO: We should probably spawn a task here.
-      stream.send(Message::Pong(dat)).await?;
+      stream.send(msg).await?;
       Ok((None, false))
     },
     Message::Pong(_) => Ok((None, false)),
@@ -136,7 +138,10 @@ where
               ping = match ping {
                 Ping::NotNeeded => Ping::Needed,
                 Ping::Needed => {
-                  let result = sink.send(Message::Ping(Vec::new())).await;
+                  let msg = Message::Ping(Vec::new());
+                  trace!(send_msg = debug(&msg));
+
+                  let result = sink.send(msg).await;
                   if let Err(err) = result {
                     break (Err(err), false)
                   }
