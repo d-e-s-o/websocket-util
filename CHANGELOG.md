@@ -1,5 +1,5 @@
-Unreleased
-----------
+0.4.0
+-----
 - Removed deserialization support
   - Removed `serde` and `serde_json` dependencies
 
