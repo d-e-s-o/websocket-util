@@ -14,10 +14,6 @@ use futures::Stream;
 use futures::StreamExt;
 use futures::TryStreamExt;
 
-use serde::de::DeserializeOwned;
-use serde_json::from_slice as from_json;
-use serde_json::Error as JsonError;
-
 use tokio::stream::StreamExt as TokioStreamExt;
 use tokio::time::interval;
 
@@ -45,13 +41,12 @@ enum Ping {
 
 
 /// Handle a single message from the stream.
-async fn handle_msg<S, I>(
+async fn handle_msg<S>(
   result: Option<Result<Message, WebSocketError>>,
   stream: &mut S,
-) -> Result<(Option<Result<I, JsonError>>, bool), WebSocketError>
+) -> Result<(Option<Vec<u8>>, bool), WebSocketError>
 where
   S: Sink<Message, Error = WebSocketError> + Unpin,
-  I: DeserializeOwned,
 {
   let result =
     result.ok_or_else(|| WebSocketError::Protocol("connection lost unexpectedly".into()))?;
@@ -63,21 +58,14 @@ where
     Message::Close(_) => Ok((None, true)),
     Message::Text(txt) => {
       debug!(text = display(&txt));
-      match from_json::<I>(txt.as_bytes()) {
-        Ok(resp) => Ok((Some(Ok(resp)), false)),
-        Err(err) => return Ok((Some(Err(err)), false)),
-      }
+      Ok((Some(txt.into_bytes()), false))
     },
     Message::Binary(dat) => {
       match from_utf8(&dat) {
         Ok(s) => debug!(data = display(&s)),
         Err(b) => debug!(data = display(&b)),
       }
-
-      match from_json::<I>(dat.as_slice()) {
-        Ok(resp) => Ok((Some(Ok(resp)), false)),
-        Err(err) => return Ok((Some(Err(err)), false)),
-      }
+      Ok((Some(dat), false))
     },
     Message::Ping(dat) => {
       let msg = Message::Pong(dat);
@@ -90,14 +78,13 @@ where
   }
 }
 
-async fn stream_impl<S, I>(
+async fn stream_impl<S>(
   stream: S,
   ping_interval: Duration,
-) -> impl Stream<Item = Result<Result<I, JsonError>, WebSocketError>>
+) -> impl Stream<Item = Result<Vec<u8>, WebSocketError>>
 where
   S: Sink<Message, Error = WebSocketError>,
   S: Stream<Item = Result<Message, WebSocketError>> + Unpin,
-  I: DeserializeOwned,
 {
   let mut ping = Ping::NotNeeded;
   let pinger = interval(ping_interval);
@@ -167,13 +154,10 @@ where
 
 /// Create a stream of higher level primitives out of a client, honoring
 /// and filtering websocket control messages such as `Ping` and `Close`.
-pub async fn stream<S, I>(
-  stream: S,
-) -> impl Stream<Item = Result<Result<I, JsonError>, WebSocketError>>
+pub async fn stream<S>(stream: S) -> impl Stream<Item = Result<Vec<u8>, WebSocketError>>
 where
   S: Sink<Message, Error = WebSocketError>,
   S: Stream<Item = Result<Message, WebSocketError>> + Unpin,
-  I: DeserializeOwned,
 {
   stream_impl(stream, Duration::from_secs(30)).await
 }
@@ -184,10 +168,6 @@ mod tests {
   use super::*;
 
   use std::future::Future;
-
-  use serde::Deserialize;
-  use serde::Serialize;
-  use serde_json::to_string as to_json;
 
   use test_env_log::test;
 
@@ -200,18 +180,6 @@ mod tests {
   use crate::test::mock_server;
   use crate::test::WebSocketStream;
 
-
-  /// A dummy event used for testing.
-  #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-  struct Event {
-    value: usize,
-  }
-
-  impl Event {
-    pub fn new(value: usize) -> Self {
-      Self { value }
-    }
-  }
 
   async fn serve_and_connect<F, R>(
     f: F,
@@ -227,14 +195,12 @@ mod tests {
     s
   }
 
-  async fn mock_stream<F, R>(
-    f: F,
-  ) -> impl Stream<Item = Result<Result<Event, JsonError>, WebSocketError>>
+  async fn mock_stream<F, R>(f: F) -> impl Stream<Item = Result<Vec<u8>, WebSocketError>>
   where
     F: Copy + FnOnce(WebSocketStream) -> R + Send + Sync + 'static,
     R: Future<Output = Result<(), WebSocketError>> + Send + Sync + 'static,
   {
-    stream::<_, Event>(serve_and_connect(f).await).await
+    stream::<_>(serve_and_connect(f).await).await
   }
 
   #[test(tokio::test)]
@@ -273,24 +239,25 @@ mod tests {
   #[test(tokio::test)]
   async fn decode_error_errors_do_not_terminate() {
     async fn test(mut stream: WebSocketStream) -> Result<(), WebSocketError> {
+      stream.send(Message::Text("1337".to_string())).await?;
       stream
-        .send(Message::Text("{ foobarbaz }".to_string()))
-        .await?;
-      stream
-        .send(Message::Text(to_json(&Event::new(42)).unwrap()))
+        .send(Message::Binary("42".to_string().into_bytes()))
         .await?;
       stream.send(Message::Close(None)).await?;
       Ok(())
     }
 
     let stream = mock_stream(test).await;
-    let events = StreamExt::collect::<Vec<_>>(stream).await;
+    let messages = StreamExt::collect::<Vec<_>>(stream).await;
 
-    let mut iter = events.iter();
-    assert!(iter.next().unwrap().as_ref().unwrap().is_err());
+    let mut iter = messages.iter();
     assert_eq!(
-      iter.next().unwrap().as_ref().unwrap().as_ref().unwrap(),
-      &Event::new(42),
+      iter.next().unwrap().as_ref().unwrap(),
+      &"1337".to_string().into_bytes(),
+    );
+    assert_eq!(
+      iter.next().unwrap().as_ref().unwrap(),
+      &"42".to_string().into_bytes(),
     );
     assert!(iter.next().is_none());
   }
@@ -317,16 +284,14 @@ mod tests {
   #[test(tokio::test)]
   async fn no_pongs() {
     async fn test(mut stream: WebSocketStream) -> Result<(), WebSocketError> {
-      stream
-        .send(Message::Text(to_json(&Event::new(42)).unwrap()))
-        .await?;
+      stream.send(Message::Text("test".to_string())).await?;
 
       delay_for(Duration::from_secs(10)).await;
       Ok(())
     }
 
     let ping = Duration::from_millis(1);
-    let stream = stream_impl::<_, Event>(serve_and_connect(test).await, ping).await;
+    let stream = stream_impl::<_>(serve_and_connect(test).await, ping).await;
     let err = stream.try_for_each(|_| ready(Ok(()))).await.unwrap_err();
     assert_eq!(
       err.to_string(),
@@ -337,25 +302,21 @@ mod tests {
   #[test(tokio::test)]
   async fn no_messages_dropped() {
     async fn test(mut stream: WebSocketStream) -> Result<(), WebSocketError> {
-      stream
-        .send(Message::Text(to_json(&Event::new(42)).unwrap()))
-        .await?;
-
+      stream.send(Message::Text("42".to_string())).await?;
       stream.send(Message::Pong(Vec::new())).await?;
-
-      stream
-        .send(Message::Text(to_json(&Event::new(43)).unwrap()))
-        .await?;
-
+      stream.send(Message::Text("43".to_string())).await?;
       stream.send(Message::Close(None)).await?;
       Ok(())
     }
 
     let ping = Duration::from_millis(10);
-    let stream = stream_impl::<_, Event>(serve_and_connect(test).await, ping).await;
+    let stream = stream_impl::<_>(serve_and_connect(test).await, ping).await;
     let stream = StreamExt::map(stream, |r| r.unwrap());
-    let stream = StreamExt::map(stream, |r| r.unwrap());
-    let events = StreamExt::collect::<Vec<_>>(stream).await;
-    assert_eq!(events, vec![Event::new(42), Event::new(43)]);
+    let stream = StreamExt::map(stream, |r| r);
+    let messages = StreamExt::collect::<Vec<_>>(stream).await;
+    assert_eq!(
+      messages,
+      vec!["42".to_string().into_bytes(), "43".to_string().into_bytes()]
+    );
   }
 }

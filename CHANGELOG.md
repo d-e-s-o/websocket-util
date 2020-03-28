@@ -1,3 +1,9 @@
+Unreleased
+----------
+- Removed deserialization support
+  - Removed `serde` and `serde_json` dependencies
+
+
 0.3.0
 -----
 - Added support for sending pings and evaluating pongs
