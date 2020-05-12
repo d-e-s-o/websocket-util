@@ -229,7 +229,7 @@ mod tests {
       Ok(())
     }
 
-    let _ = mock_stream(test)
+    mock_stream(test)
       .await
       .try_for_each(|_| ready(Ok(())))
       .await
@@ -277,8 +277,11 @@ mod tests {
       Ok(())
     }
 
-    let stream = mock_stream(test).await;
-    let _ = stream.try_for_each(|_| ready(Ok(()))).await.unwrap();
+    mock_stream(test)
+      .await
+      .try_for_each(|_| ready(Ok(())))
+      .await
+      .unwrap();
   }
 
   #[test(tokio::test)]
