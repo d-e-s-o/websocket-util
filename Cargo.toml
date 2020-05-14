@@ -12,6 +12,9 @@ A crate providing an easy to consume streaming interface for WebSocket
 data.
 """
 
+[badges]
+gitlab = { repository = "d-e-s-o/websocket-util", branch = "master" }
+
 [features]
 test = ["tungstenite/tokio-runtime"]
 
