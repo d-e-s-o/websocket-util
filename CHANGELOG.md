@@ -3,6 +3,7 @@ Unreleased
 - Enabled CI pipeline comprising building, testing, linting, and
   coverage collection of the project
   - Added badges indicating pipeline status and code coverage percentage
+- Bumped `async-tungstenite` dependency to `0.5`
 
 
 0.4.0
