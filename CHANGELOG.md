@@ -1,3 +1,8 @@
+Unreleased
+----------
+- Bumped `async-tungstenite` dependency to `0.6`
+
+
 0.5.0
 -----
 - Enabled CI pipeline comprising building, testing, linting, and
