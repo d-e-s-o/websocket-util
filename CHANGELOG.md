@@ -1,5 +1,5 @@
-Unreleased
-----------
+0.6.0
+-----
 - Bumped `async-tungstenite` dependency to `0.8`
 
 
