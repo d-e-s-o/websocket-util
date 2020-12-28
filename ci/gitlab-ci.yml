@@ -19,6 +19,7 @@ build:cargo:
   script:
   - rustc --version && cargo --version
   - cargo build --lib --tests --verbose
+  - cargo build --lib --tests --verbose --release
 
 test:cargo:
   stage: test
