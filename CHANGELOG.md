@@ -1,3 +1,8 @@
+Unreleased
+----------
+- Bumped minimum supported Rust version to `1.43`
+
+
 0.6.0
 -----
 - Bumped `async-tungstenite` dependency to `0.8`
