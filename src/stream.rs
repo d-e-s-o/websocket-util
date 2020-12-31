@@ -7,6 +7,7 @@ use std::time::Duration;
 use futures::future::ready;
 use futures::future::select;
 use futures::future::Either;
+use futures::pin_mut;
 use futures::stream::unfold;
 use futures::Sink;
 use futures::SinkExt;
@@ -14,14 +15,12 @@ use futures::Stream;
 use futures::StreamExt;
 use futures::TryStreamExt;
 
-use tokio::stream::StreamExt as TokioStreamExt;
 use tokio::time::interval;
+use tokio_tungstenite::tungstenite::Error as WebSocketError;
+use tokio_tungstenite::tungstenite::Message;
 
 use tracing::debug;
 use tracing::trace;
-
-use tungstenite::tungstenite::Error as WebSocketError;
-use tungstenite::tungstenite::Message;
 
 
 /// An enum encapsulating the state machine to handle pings to the
@@ -102,7 +101,8 @@ where
         let mut next_msg = StreamExt::next(&mut stream);
 
         let (result, closed) = loop {
-          let next_ping = TokioStreamExt::next(&mut pinger);
+          let next_ping = pinger.tick();
+          pin_mut!(next_ping);
 
           let either = select(next_msg, next_ping).await;
           match either {
@@ -120,8 +120,6 @@ where
               break (result, closed)
             },
             Either::Right((_ping, next)) => {
-              debug_assert!(_ping.is_some());
-
               ping = match ping {
                 Ping::NotNeeded => Ping::Needed,
                 Ping::Needed => {
@@ -171,9 +169,9 @@ mod tests {
 
   use test_env_log::test;
 
-  use tokio::time::delay_for;
+  use tokio::time::sleep;
 
-  use tungstenite::tokio::connect_async;
+  use tokio_tungstenite::connect_async;
 
   use url::Url;
 
@@ -289,7 +287,7 @@ mod tests {
     async fn test(mut stream: WebSocketStream) -> Result<(), WebSocketError> {
       stream.send(Message::Text("test".to_string())).await?;
 
-      delay_for(Duration::from_secs(10)).await;
+      sleep(Duration::from_secs(10)).await;
       Ok(())
     }
 

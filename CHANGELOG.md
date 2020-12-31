@@ -1,6 +1,8 @@
 Unreleased
 ----------
+- Replaced `async-tungstenite` dependency with `tokio-tungstenite`
 - Bumped minimum supported Rust version to `1.43`
+- Bumped `tokio` dependency to `0.3`
 
 
 0.6.0

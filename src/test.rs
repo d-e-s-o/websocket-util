@@ -10,14 +10,13 @@ use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 use tokio::spawn;
 
-use tungstenite::accept_async as accept_websocket;
-use tungstenite::tokio::TokioAdapter;
-use tungstenite::tungstenite::Error as WebSocketError;
-use tungstenite::WebSocketStream as WsStream;
+use tokio_tungstenite::accept_async as accept_websocket;
+use tokio_tungstenite::tungstenite::Error as WebSocketError;
+use tokio_tungstenite::WebSocketStream as WsStream;
 
 
 /// The WebSocket stream type we use in the server.
-pub type WebSocketStream = WsStream<TokioAdapter<TcpStream>>;
+pub type WebSocketStream = WsStream<TcpStream>;
 
 
 /// Create a WebSocket server that handles a customizable set of
@@ -27,14 +26,14 @@ where
   F: FnOnce(WebSocketStream) -> R + Send + Sync + 'static,
   R: Future<Output = Result<(), WebSocketError>> + Send + Sync + 'static,
 {
-  let mut listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+  let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
   let addr = listener.local_addr().unwrap();
 
   let future = async move {
     listener
       .accept()
       .map(move |result| result.unwrap())
-      .then(|(stream, _addr)| accept_websocket(TokioAdapter(stream)))
+      .then(|(stream, _addr)| accept_websocket(stream))
       .map(move |result| result.unwrap())
       .then(move |ws_stream| f(ws_stream))
       .await

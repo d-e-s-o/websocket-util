@@ -16,19 +16,18 @@ data.
 gitlab = { repository = "d-e-s-o/websocket-util", branch = "master" }
 
 [features]
-test = ["tungstenite/tokio-runtime"]
+test = []
 
 [dependencies]
 futures = {version = "0.3", default-features = false}
-tokio = {version = "0.2", default-features = false, features = ["rt-core", "stream", "time"]}
+tokio = {version = "0.3", default-features = false, features = ["rt", "time"]}
 tracing = {version = "0.1", default-features = false, features = ["std"]}
 tracing-futures = {version = "0.2", default-features = false, features = ["std-future"]}
-tungstenite = {package = "async-tungstenite", version = "0.8", default-features = false}
+tokio-tungstenite = {version = "0.12", default-features = false, features = ["connect"]}
 
 [dev-dependencies]
 env_logger = {version = "0.7", default-features = false}
 serde = {version = "1.0", features = ["derive"]}
 test-env-log = "0.2"
-tokio = {version = "0.2", default-features = false, features = ["rt-core", "macros"]}
-tungstenite = {package = "async-tungstenite", version = "0.8", default-features = false, features = ["tokio-runtime"]}
+tokio = {version = "0.3", default-features = false, features = ["rt", "macros", "net"]}
 url = "2.0"
