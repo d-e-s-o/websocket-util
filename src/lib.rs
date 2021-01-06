@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2020 Daniel Mueller <deso@posteo.net>
+// Copyright (C) 2019-2021 Daniel Mueller <deso@posteo.net>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #![warn(
@@ -48,6 +48,9 @@
 //! JSON decoded objects.
 
 mod stream;
+
+/// Re-export of the tungstenite version the crate interfaces with.
+pub use tokio_tungstenite::tungstenite;
 
 /// A module providing functionality for testing WebSocket streams.
 #[cfg(any(test, feature = "test"))]
