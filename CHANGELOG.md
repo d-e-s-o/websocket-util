@@ -1,5 +1,5 @@
-Unreleased
-----------
+0.7.0
+-----
 - Replaced `async-tungstenite` dependency with `tokio-tungstenite`
 - Added public `tungstenite` export
 - Excluded unnecessary files from being contained in release bundle
