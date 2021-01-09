@@ -2,6 +2,7 @@ Unreleased
 ----------
 - Replaced `async-tungstenite` dependency with `tokio-tungstenite`
 - Added public `tungstenite` export
+- Excluded unnecessary files from being contained in release bundle
 - Bumped minimum supported Rust version to `1.43`
 - Bumped `tokio` dependency to `1.0`
 - Removed `tracing-futures` dependency
