@@ -4,6 +4,7 @@ Unreleased
 - Added public `tungstenite` export
 - Bumped minimum supported Rust version to `1.43`
 - Bumped `tokio` dependency to `1.0`
+- Removed `tracing-futures` dependency
 
 
 0.6.0

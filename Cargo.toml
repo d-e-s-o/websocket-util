@@ -22,7 +22,6 @@ test = []
 futures = {version = "0.3", default-features = false}
 tokio = {version = "1.0", default-features = false, features = ["rt", "time"]}
 tracing = {version = "0.1", default-features = false, features = ["std"]}
-tracing-futures = {version = "0.2", default-features = false, features = ["std-future"]}
 tokio-tungstenite = {version = "0.13", default-features = false, features = ["connect"]}
 
 [dev-dependencies]
