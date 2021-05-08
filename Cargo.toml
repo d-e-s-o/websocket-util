@@ -23,7 +23,7 @@ test = []
 futures = {version = "0.3", default-features = false}
 tokio = {version = "1.0", default-features = false, features = ["rt", "time"]}
 tracing = {version = "0.1", default-features = false, features = ["std"]}
-tokio-tungstenite = {version = "0.13", default-features = false, features = ["connect"]}
+tokio-tungstenite = {version = "0.14", default-features = false, features = ["connect"]}
 
 [dev-dependencies]
 serde = {version = "1.0", features = ["derive"]}

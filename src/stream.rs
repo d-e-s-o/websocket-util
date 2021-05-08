@@ -1,6 +1,7 @@
-// Copyright (C) 2019-2020 Daniel Mueller <deso@posteo.net>
+// Copyright (C) 2019-2021 Daniel Mueller <deso@posteo.net>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::io;
 use std::str::from_utf8;
 use std::time::Duration;
 
@@ -47,8 +48,7 @@ async fn handle_msg<S>(
 where
   S: Sink<Message, Error = WebSocketError> + Unpin,
 {
-  let result =
-    result.ok_or_else(|| WebSocketError::Protocol("connection lost unexpectedly".into()))?;
+  let result = result.ok_or_else(|| WebSocketError::AlreadyClosed)?;
   let msg = result?;
 
   trace!(recv_msg = debug(&msg));
@@ -133,7 +133,10 @@ where
                   Ping::Pending
                 },
                 Ping::Pending => {
-                  let err = WebSocketError::Protocol("server failed to respond to pings".into());
+                  let err = WebSocketError::Io(io::Error::new(
+                    io::ErrorKind::Other,
+                    "server failed to respond to pings",
+                  ));
                   break (Err(err), true)
                 },
               };
@@ -172,6 +175,7 @@ mod tests {
   use tokio::time::sleep;
 
   use tokio_tungstenite::connect_async;
+  use tokio_tungstenite::tungstenite::error::ProtocolError;
 
   use url::Url;
 
@@ -214,7 +218,7 @@ mod tests {
       .unwrap_err();
 
     match err {
-      WebSocketError::Protocol(ref e) if e == "Connection reset without closing handshake" => (),
+      WebSocketError::Protocol(e) if e == ProtocolError::ResetWithoutClosingHandshake => (),
       e => panic!("received unexpected error: {}", e),
     }
   }
@@ -296,7 +300,7 @@ mod tests {
     let err = stream.try_for_each(|_| ready(Ok(()))).await.unwrap_err();
     assert_eq!(
       err.to_string(),
-      "WebSocket protocol error: server failed to respond to pings"
+      "IO error: server failed to respond to pings"
     );
   }
 
