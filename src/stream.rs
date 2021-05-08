@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2020 Daniel Mueller <deso@posteo.net>
+// Copyright (C) 2019-2021 Daniel Mueller <deso@posteo.net>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::str::from_utf8;
@@ -106,6 +106,7 @@ where
 
           let either = select(next_msg, next_ping).await;
           match either {
+            #[allow(unused_assignments)]
             Either::Left((result, _next)) => {
               // We just got a message from the server. Whatever it was,
               // it means our connection is still standing, so no need
