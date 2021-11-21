@@ -1,3 +1,8 @@
+Unreleased
+----------
+- Bumped minimum supported Rust version to `1.46`
+
+
 0.8.0
 -----
 - Bumped minimum supported Rust version to `1.45`
