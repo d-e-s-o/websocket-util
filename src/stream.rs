@@ -171,7 +171,7 @@ mod tests {
 
   use std::future::Future;
 
-  use test_env_log::test;
+  use test_log::test;
 
   use tokio::time::sleep;
 

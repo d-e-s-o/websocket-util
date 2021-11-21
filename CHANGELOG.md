@@ -1,5 +1,6 @@
 Unreleased
 ----------
+- Switched from using `test-env-log` to `test-log`
 - Bumped minimum supported Rust version to `1.46`
 
 
