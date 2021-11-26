@@ -18,7 +18,7 @@ use futures::TryStreamExt;
 
 use tokio::time::interval;
 use tokio_tungstenite::tungstenite::Error as WebSocketError;
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::Message as WebSocketMessage;
 
 use tracing::debug;
 use tracing::trace;
@@ -42,11 +42,11 @@ enum Ping {
 
 /// Handle a single message from the stream.
 async fn handle_msg<S>(
-  result: Option<Result<Message, WebSocketError>>,
+  result: Option<Result<WebSocketMessage, WebSocketError>>,
   stream: &mut S,
 ) -> Result<(Option<Vec<u8>>, bool), WebSocketError>
 where
-  S: Sink<Message, Error = WebSocketError> + Unpin,
+  S: Sink<WebSocketMessage, Error = WebSocketError> + Unpin,
 {
   let result = result.ok_or(WebSocketError::AlreadyClosed)?;
   let msg = result?;
@@ -54,26 +54,26 @@ where
   trace!(recv_msg = debug(&msg));
 
   match msg {
-    Message::Close(_) => Ok((None, true)),
-    Message::Text(txt) => {
+    WebSocketMessage::Close(_) => Ok((None, true)),
+    WebSocketMessage::Text(txt) => {
       debug!(text = display(&txt));
       Ok((Some(txt.into_bytes()), false))
     },
-    Message::Binary(dat) => {
+    WebSocketMessage::Binary(dat) => {
       match from_utf8(&dat) {
         Ok(s) => debug!(data = display(&s)),
         Err(b) => debug!(data = display(&b)),
       }
       Ok((Some(dat), false))
     },
-    Message::Ping(dat) => {
-      let msg = Message::Pong(dat);
+    WebSocketMessage::Ping(dat) => {
+      let msg = WebSocketMessage::Pong(dat);
       trace!(send_msg = debug(&msg));
       // TODO: We should probably spawn a task here.
       stream.send(msg).await?;
       Ok((None, false))
     },
-    Message::Pong(_) => Ok((None, false)),
+    WebSocketMessage::Pong(_) => Ok((None, false)),
   }
 }
 
@@ -82,8 +82,8 @@ async fn stream_impl<S>(
   ping_interval: Duration,
 ) -> impl Stream<Item = Result<Vec<u8>, WebSocketError>>
 where
-  S: Sink<Message, Error = WebSocketError>,
-  S: Stream<Item = Result<Message, WebSocketError>> + Unpin,
+  S: Sink<WebSocketMessage, Error = WebSocketError>,
+  S: Stream<Item = Result<WebSocketMessage, WebSocketError>> + Unpin,
 {
   let mut ping = Ping::NotNeeded;
   let pinger = interval(ping_interval);
@@ -124,7 +124,7 @@ where
               ping = match ping {
                 Ping::NotNeeded => Ping::Needed,
                 Ping::Needed => {
-                  let msg = Message::Ping(Vec::new());
+                  let msg = WebSocketMessage::Ping(Vec::new());
                   trace!(send_msg = debug(&msg));
 
                   let result = sink.send(msg).await;
@@ -158,8 +158,8 @@ where
 /// and filtering websocket control messages such as `Ping` and `Close`.
 pub async fn stream<S>(stream: S) -> impl Stream<Item = Result<Vec<u8>, WebSocketError>>
 where
-  S: Sink<Message, Error = WebSocketError>,
-  S: Stream<Item = Result<Message, WebSocketError>> + Unpin,
+  S: Sink<WebSocketMessage, Error = WebSocketError>,
+  S: Stream<Item = Result<WebSocketMessage, WebSocketError>> + Unpin,
 {
   stream_impl(stream, Duration::from_secs(30)).await
 }
@@ -186,7 +186,9 @@ mod tests {
 
   async fn serve_and_connect<F, R>(
     f: F,
-  ) -> impl Stream<Item = Result<Message, WebSocketError>> + Sink<Message, Error = WebSocketError> + Unpin
+  ) -> impl Stream<Item = Result<WebSocketMessage, WebSocketError>>
+       + Sink<WebSocketMessage, Error = WebSocketError>
+       + Unpin
   where
     F: Copy + FnOnce(WebSocketStream) -> R + Send + Sync + 'static,
     R: Future<Output = Result<(), WebSocketError>> + Send + Sync + 'static,
@@ -228,7 +230,7 @@ mod tests {
   async fn direct_close() {
     async fn test(mut stream: WebSocketStream) -> Result<(), WebSocketError> {
       // Just respond with a Close.
-      stream.send(Message::Close(None)).await?;
+      stream.send(WebSocketMessage::Close(None)).await?;
       Ok(())
     }
 
@@ -242,11 +244,13 @@ mod tests {
   #[test(tokio::test)]
   async fn decode_error_errors_do_not_terminate() {
     async fn test(mut stream: WebSocketStream) -> Result<(), WebSocketError> {
-      stream.send(Message::Text("1337".to_string())).await?;
       stream
-        .send(Message::Binary("42".to_string().into_bytes()))
+        .send(WebSocketMessage::Text("1337".to_string()))
         .await?;
-      stream.send(Message::Close(None)).await?;
+      stream
+        .send(WebSocketMessage::Binary("42".to_string().into_bytes()))
+        .await?;
+      stream.send(WebSocketMessage::Close(None)).await?;
       Ok(())
     }
 
@@ -269,14 +273,14 @@ mod tests {
   async fn ping_pong() {
     async fn test(mut stream: WebSocketStream) -> Result<(), WebSocketError> {
       // Ping.
-      stream.send(Message::Ping(Vec::new())).await?;
+      stream.send(WebSocketMessage::Ping(Vec::new())).await?;
       // Expect Pong.
       assert_eq!(
         StreamExt::next(&mut stream).await.unwrap()?,
-        Message::Pong(Vec::new()),
+        WebSocketMessage::Pong(Vec::new()),
       );
 
-      stream.send(Message::Close(None)).await?;
+      stream.send(WebSocketMessage::Close(None)).await?;
       Ok(())
     }
 
@@ -290,7 +294,9 @@ mod tests {
   #[test(tokio::test)]
   async fn no_pongs() {
     async fn test(mut stream: WebSocketStream) -> Result<(), WebSocketError> {
-      stream.send(Message::Text("test".to_string())).await?;
+      stream
+        .send(WebSocketMessage::Text("test".to_string()))
+        .await?;
 
       sleep(Duration::from_secs(10)).await;
       Ok(())
@@ -308,10 +314,14 @@ mod tests {
   #[test(tokio::test)]
   async fn no_messages_dropped() {
     async fn test(mut stream: WebSocketStream) -> Result<(), WebSocketError> {
-      stream.send(Message::Text("42".to_string())).await?;
-      stream.send(Message::Pong(Vec::new())).await?;
-      stream.send(Message::Text("43".to_string())).await?;
-      stream.send(Message::Close(None)).await?;
+      stream
+        .send(WebSocketMessage::Text("42".to_string()))
+        .await?;
+      stream.send(WebSocketMessage::Pong(Vec::new())).await?;
+      stream
+        .send(WebSocketMessage::Text("43".to_string()))
+        .await?;
+      stream.send(WebSocketMessage::Close(None)).await?;
       Ok(())
     }
 
