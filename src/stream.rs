@@ -48,7 +48,7 @@ async fn handle_msg<S>(
 where
   S: Sink<Message, Error = WebSocketError> + Unpin,
 {
-  let result = result.ok_or_else(|| WebSocketError::AlreadyClosed)?;
+  let result = result.ok_or(WebSocketError::AlreadyClosed)?;
   let msg = result?;
 
   trace!(recv_msg = debug(&msg));
