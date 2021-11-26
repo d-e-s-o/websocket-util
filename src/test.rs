@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2020 Daniel Mueller <deso@posteo.net>
+// Copyright (C) 2019-2021 Daniel Mueller <deso@posteo.net>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::future::Future;
@@ -12,11 +12,12 @@ use tokio::spawn;
 
 use tokio_tungstenite::accept_async as accept_websocket;
 use tokio_tungstenite::tungstenite::Error as WebSocketError;
+use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream as WsStream;
 
 
 /// The WebSocket stream type we use in the server.
-pub type WebSocketStream = WsStream<TcpStream>;
+pub type WebSocketStream = WsStream<MaybeTlsStream<TcpStream>>;
 
 
 /// Create a WebSocket server that handles a customizable set of
@@ -33,7 +34,7 @@ where
     listener
       .accept()
       .map(move |result| result.unwrap())
-      .then(|(stream, _addr)| accept_websocket(stream))
+      .then(|(stream, _addr)| accept_websocket(MaybeTlsStream::Plain(stream)))
       .map(move |result| result.unwrap())
       .then(move |ws_stream| f(ws_stream))
       .await

@@ -184,13 +184,12 @@ mod tests {
   use crate::test::WebSocketStream;
 
 
-  async fn serve_and_connect<F, R>(
-    f: F,
-  ) -> impl Stream<Item = Result<WebSocketMessage, WebSocketError>>
-       + Sink<WebSocketMessage, Error = WebSocketError>
-       + Unpin
+  /// Instantiate a websocket server serving data provided by the
+  /// given function, connect to said server, and return the resulting
+  /// stream.
+  async fn serve_and_connect<F, R>(f: F) -> WebSocketStream
   where
-    F: Copy + FnOnce(WebSocketStream) -> R + Send + Sync + 'static,
+    F: FnOnce(WebSocketStream) -> R + Send + Sync + 'static,
     R: Future<Output = Result<(), WebSocketError>> + Send + Sync + 'static,
   {
     let addr = mock_server(f).await;
