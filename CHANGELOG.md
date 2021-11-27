@@ -4,6 +4,7 @@ Unreleased
   `tungstenite::MaybeTlsStream`
 - Switched from using `test-env-log` to `test-log`
 - Bumped minimum supported Rust version to `1.51`
+- Bumped `tokio-tungstenite` dependency to `0.16`
 
 
 0.8.0
