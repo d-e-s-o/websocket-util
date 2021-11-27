@@ -3,7 +3,7 @@ Unreleased
 - Adjusted `test::WebSocketStream` alias to include
   `tungstenite::MaybeTlsStream`
 - Switched from using `test-env-log` to `test-log`
-- Bumped minimum supported Rust version to `1.46`
+- Bumped minimum supported Rust version to `1.51`
 
 
 0.8.0

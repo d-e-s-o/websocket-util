@@ -2,7 +2,7 @@
 [![coverage](https://gitlab.com/d-e-s-o/websocket-util/badges/master/coverage.svg)](https://gitlab.com/d-e-s-o/websocket-util/-/jobs/artifacts/master/file/kcov/kcov-merged/index.html?job=coverage:kcov)
 [![crates.io](https://img.shields.io/crates/v/websocket-util.svg)](https://crates.io/crates/websocket-util)
 [![Docs](https://docs.rs/websocket-util/badge.svg)](https://docs.rs/websocket-util)
-[![rustc](https://img.shields.io/badge/rustc-1.46+-blue.svg)](https://blog.rust-lang.org/2020/08/27/Rust-1.46.0.html)
+[![rustc](https://img.shields.io/badge/rustc-1.51+-blue.svg)](https://blog.rust-lang.org/2021/03/25/Rust-1.51.0.html)
 
 websocket-util
 ==============
