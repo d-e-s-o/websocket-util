@@ -1,5 +1,5 @@
-Unreleased
-----------
+0.9.0
+-----
 - Adjusted `test::WebSocketStream` alias to include
   `tungstenite::MaybeTlsStream`
 - Switched from using `test-env-log` to `test-log`
