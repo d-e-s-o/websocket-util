@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::io;
+use std::pin::Pin;
 use std::str::from_utf8;
+use std::task::Poll as StdPoll;
 use std::time::Duration;
 
 use futures::future::ready;
@@ -10,6 +12,8 @@ use futures::future::select;
 use futures::future::Either;
 use futures::pin_mut;
 use futures::stream::unfold;
+use futures::task::Context;
+use futures::task::Poll;
 use futures::Sink;
 use futures::SinkExt;
 use futures::Stream;
@@ -17,6 +21,7 @@ use futures::StreamExt;
 use futures::TryStreamExt;
 
 use tokio::time::interval;
+use tokio::time::Interval;
 use tokio_tungstenite::tungstenite::Error as WebSocketError;
 use tokio_tungstenite::tungstenite::Message as WebSocketMessage;
 
@@ -162,6 +167,257 @@ where
   S: Stream<Item = Result<WebSocketMessage, WebSocketError>> + Unpin,
 {
   stream_impl(stream, Duration::from_secs(30)).await
+}
+
+
+/// A message received over a `WebSocketStream`.
+#[derive(Debug, PartialEq)]
+pub enum Message {
+  /// A text WebSocket message.
+  Text(String),
+  /// A binary WebSocket message.
+  Binary(Vec<u8>),
+}
+
+impl From<Message> for WebSocketMessage {
+  fn from(message: Message) -> Self {
+    match message {
+      Message::Text(data) => WebSocketMessage::Text(data),
+      Message::Binary(data) => WebSocketMessage::Binary(data),
+    }
+  }
+}
+
+
+/// The state we maintain to track the sending of control messages.
+#[derive(Debug)]
+enum SendMessageState<M> {
+  /// The message slot is not in use currently.
+  Unused,
+  /// A message is pending to be sent.
+  ///
+  /// Note that the `Option` part is an implementation detail allowing
+  /// us to `take` ownership of the message from a `&mut self` context
+  /// without requiring that `M: Default` or making similar assumptions.
+  Pending(Option<M>),
+  /// A message has been sent but not yet flushed.
+  Flush,
+}
+
+impl<M> SendMessageState<M> {
+  /// Attempt to advance the message state by one step.
+  fn poll<S>(&mut self, sink: Pin<&mut S>, ctx: &mut Context<'_>) -> Poll<Result<(), S::Error>>
+  where
+    S: Sink<M> + Unpin,
+  {
+    let mut sink = Pin::get_mut(sink);
+
+    match self {
+      Self::Unused => Poll::Ready(Ok(())),
+      Self::Pending(message) => {
+        match Pin::new(&mut sink).poll_ready(ctx) {
+          Poll::Pending => return Poll::Pending,
+          Poll::Ready(Ok(())) => (),
+          Poll::Ready(Err(err)) => {
+            *self = Self::Unused;
+            return Poll::Ready(Err(err))
+          },
+        }
+
+        let message = message.take();
+        *self = Self::Unused;
+
+        if let Some(message) = message {
+          if let Err(err) = Pin::new(&mut sink).start_send(message) {
+            return Poll::Ready(Err(err))
+          }
+          *self = Self::Flush;
+        }
+        Poll::Ready(Ok(()))
+      },
+      Self::Flush => {
+        *self = Self::Unused;
+        Pin::new(&mut sink).poll_flush(ctx)
+      },
+    }
+  }
+}
+
+
+/// A wrapped websocket channel that handles responding to pings, sends
+/// pings to check for liveness of server, and filters out websocket
+/// control messages in the process.
+#[derive(Debug)]
+#[must_use = "streams do nothing unless polled"]
+pub struct Wrapper<S> {
+  /// The wrapped stream & sink.
+  inner: S,
+  /// The state we maintain for sending pongs over our internal sink.
+  pong: SendMessageState<WebSocketMessage>,
+  /// The state we maintain for sending pings over our internal sink.
+  ping: SendMessageState<WebSocketMessage>,
+  /// An object keeping track of when we should be sending the next
+  /// ping to the server.
+  next_ping: Interval,
+  /// State helping us keep track of pings that we want to send to the
+  /// server.
+  ping_state: Ping,
+}
+
+impl<S> Wrapper<S> {
+  /// Create a `Wrapper` object wrapping the provided stream that uses
+  /// the default ping interval (30s).
+  pub fn with_default(inner: S) -> Self {
+    Self::new(inner, Duration::from_secs(30))
+  }
+
+  /// Create a `Wrapper` object wrapping the provided stream.
+  pub fn new(inner: S, ping_interval: Duration) -> Self {
+    Self {
+      inner,
+      pong: SendMessageState::Unused,
+      ping: SendMessageState::Unused,
+      next_ping: interval(ping_interval),
+      ping_state: Ping::NotNeeded,
+    }
+  }
+}
+
+impl<S> Stream for Wrapper<S>
+where
+  S: Sink<WebSocketMessage, Error = WebSocketError>
+    + Stream<Item = Result<WebSocketMessage, WebSocketError>>
+    + Unpin,
+{
+  type Item = Result<Message, WebSocketError>;
+
+  fn poll_next(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    let this = Pin::get_mut(self);
+
+    // Start off by trying to advance any sending of pings and pongs.
+    if let Poll::Ready(Err(err)) = this.pong.poll(Pin::new(&mut this.inner), ctx) {
+      return Poll::Ready(Some(Err(err)))
+    }
+
+    if let Poll::Ready(Err(err)) = this.ping.poll(Pin::new(&mut this.inner), ctx) {
+      return Poll::Ready(Some(Err(err)))
+    }
+
+    // Next check whether we need to send a new ping to the server.
+    match this.next_ping.poll_tick(ctx) {
+      StdPoll::Ready(_) => {
+        // We are due sending a ping according to the user's specified
+        // ping interval. Check the existing ping state to decide what
+        // to actually do. We may not need to send a ping if we can
+        // infer that we had activity in said interval already.
+        this.ping_state = match this.ping_state {
+          Ping::NotNeeded => {
+            // If anything caused our ping state to change to
+            // `NotNeeded` (from the last time we set it to `Needed`)
+            // then just change it back to `Needed`.
+            Ping::Needed
+          },
+          Ping::Needed => {
+            // The ping state is still `Needed`, which is what we set it
+            // to at the last interval. We need to make sure to actually
+            // send a ping over the wire now to check whether our
+            // connection is still alive.
+            let message = WebSocketMessage::Ping(Vec::new());
+            // TODO: What happens if our previous ping has not been sent
+            //       at this point?
+            this.ping = SendMessageState::Pending(Some(message));
+            if let Poll::Ready(Err(err)) = this.ping.poll(Pin::new(&mut this.inner), ctx) {
+              return Poll::Ready(Some(Err(err)))
+            }
+            Ping::Pending
+          },
+          Ping::Pending => {
+            // We leave it up to clients to decide how to handle missed
+            // pings. But in order to not end up in an endless error
+            // cycle in case the client does not care, clear our ping
+            // state.
+            this.ping_state = Ping::Needed;
+
+            let err = WebSocketError::Io(io::Error::new(
+              io::ErrorKind::Other,
+              "server failed to respond to pings",
+            ));
+            return Poll::Ready(Some(Err(err)))
+          },
+        };
+      },
+      StdPoll::Pending => (),
+    }
+
+    loop {
+      match Pin::new(&mut this.inner).poll_next(ctx) {
+        Poll::Pending => {
+          // No new data is available yet. There is nothing to do for us
+          // except bubble up this result.
+          break Poll::Pending
+        },
+        Poll::Ready(None) => {
+          // The stream is exhausted. Bubble up the result and be done.
+          break Poll::Ready(None)
+        },
+        Poll::Ready(Some(Err(err))) => break Poll::Ready(Some(Err(err))),
+        Poll::Ready(Some(Ok(message))) => {
+          this.ping_state = Ping::NotNeeded;
+
+          match message {
+            WebSocketMessage::Text(data) => break Poll::Ready(Some(Ok(Message::Text(data)))),
+            WebSocketMessage::Binary(data) => break Poll::Ready(Some(Ok(Message::Binary(data)))),
+            WebSocketMessage::Ping(data) => {
+              // Respond with a pong.
+              let message = WebSocketMessage::Pong(data);
+              // TODO: What happens if our previous pong has not been sent
+              //       at this point?
+              this.pong = SendMessageState::Pending(Some(message));
+
+              if let Poll::Ready(Err(err)) = this.pong.poll(Pin::new(&mut this.inner), ctx) {
+                return Poll::Ready(Some(Err(err)))
+              }
+            },
+            WebSocketMessage::Pong(_) => {
+              // We don't handle pongs any specifically. We already
+              // registered that we received a message above.
+            },
+            WebSocketMessage::Close(_) => {
+              // We just ignore close messages. From our perspective
+              // they serve no purpose, because the stream already has a
+              // notion of "exhausted" with `Poll::Ready(None)`. The
+              // only value-add they provide is the optional close
+              // frame, but we don't intend to use it or expose it to
+              // clients.
+            },
+          }
+        },
+      }
+    }
+  }
+}
+
+impl<S> Sink<Message> for Wrapper<S>
+where
+  S: Sink<WebSocketMessage, Error = WebSocketError> + Unpin,
+{
+  type Error = WebSocketError;
+
+  fn poll_ready(mut self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    Pin::new(&mut self.inner).poll_ready(ctx)
+  }
+
+  fn start_send(mut self: Pin<&mut Self>, message: Message) -> Result<(), Self::Error> {
+    Pin::new(&mut self.inner).start_send(message.into())
+  }
+
+  fn poll_flush(mut self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    Pin::new(&mut self.inner).poll_flush(ctx)
+  }
+
+  fn poll_close(mut self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    Pin::new(&mut self.inner).poll_close(ctx)
+  }
 }
 
 

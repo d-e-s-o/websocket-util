@@ -1,3 +1,9 @@
+Unreleased
+----------
+- Introduced `Wrapper` type providing both a stream and a sink interface
+  for websocket channels
+
+
 0.9.0
 -----
 - Adjusted `test::WebSocketStream` alias to include

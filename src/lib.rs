@@ -57,3 +57,5 @@ pub use tokio_tungstenite::tungstenite;
 pub mod test;
 
 pub use stream::stream;
+pub use stream::Message;
+pub use stream::Wrapper;

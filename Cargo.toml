@@ -17,7 +17,7 @@ include = ["src/**/*", "LICENSE", "README.md", "CHANGELOG.md"]
 test = []
 
 [dependencies]
-futures = {version = "0.3", default-features = false}
+futures = {version = "0.3", default-features = false, features = ["std"]}
 tokio = {version = "1.0", default-features = false, features = ["rt", "time"]}
 tracing = {version = "0.1", default-features = false, features = ["std"]}
 tokio-tungstenite = {version = "0.16", default-features = false, features = ["connect"]}
