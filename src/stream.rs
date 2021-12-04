@@ -442,8 +442,8 @@ mod tests {
 
   /// Instantiate a websocket server serving data provided by the
   /// given function, connect to said server, and return the resulting
-  /// stream.
-  async fn serve_and_connect<F, R>(f: F) -> WebSocketStream
+  /// wrapped stream.
+  async fn serve_and_connect<F, R>(f: F) -> Wrapper<WebSocketStream>
   where
     F: FnOnce(WebSocketStream) -> R + Send + Sync + 'static,
     R: Future<Output = Result<(), WebSocketError>> + Send + Sync + 'static,
@@ -451,25 +451,20 @@ mod tests {
     let addr = mock_server(f).await;
     let url = Url::parse(&format!("ws://{}", addr.to_string())).unwrap();
 
-    let (s, _) = connect_async(url).await.unwrap();
-    s
+    let (stream, _) = connect_async(url).await.unwrap();
+    let ping = Duration::from_millis(10);
+    Wrapper::new(stream, ping)
   }
 
-  async fn mock_stream<F, R>(f: F) -> impl Stream<Item = Result<Vec<u8>, WebSocketError>>
-  where
-    F: Copy + FnOnce(WebSocketStream) -> R + Send + Sync + 'static,
-    R: Future<Output = Result<(), WebSocketError>> + Send + Sync + 'static,
-  {
-    stream::<_>(serve_and_connect(f).await).await
-  }
-
+  /// Check that our `Wrapper` behaves correctly if no messages are sent
+  /// at all.
   #[test(tokio::test)]
   async fn no_messages() {
     async fn test(_stream: WebSocketStream) -> Result<(), WebSocketError> {
       Ok(())
     }
 
-    let err = mock_stream(test)
+    let err = serve_and_connect(test)
       .await
       .try_for_each(|_| ready(Ok(())))
       .await
@@ -481,6 +476,8 @@ mod tests {
     }
   }
 
+  /// Check that our `Wrapper` handles a straight close without other
+  /// messages correctly.
   #[test(tokio::test)]
   async fn direct_close() {
     async fn test(mut stream: WebSocketStream) -> Result<(), WebSocketError> {
@@ -489,41 +486,14 @@ mod tests {
       Ok(())
     }
 
-    mock_stream(test)
+    serve_and_connect(test)
       .await
       .try_for_each(|_| ready(Ok(())))
       .await
       .unwrap();
   }
 
-  #[test(tokio::test)]
-  async fn decode_error_errors_do_not_terminate() {
-    async fn test(mut stream: WebSocketStream) -> Result<(), WebSocketError> {
-      stream
-        .send(WebSocketMessage::Text("1337".to_string()))
-        .await?;
-      stream
-        .send(WebSocketMessage::Binary("42".to_string().into_bytes()))
-        .await?;
-      stream.send(WebSocketMessage::Close(None)).await?;
-      Ok(())
-    }
-
-    let stream = mock_stream(test).await;
-    let messages = StreamExt::collect::<Vec<_>>(stream).await;
-
-    let mut iter = messages.iter();
-    assert_eq!(
-      iter.next().unwrap().as_ref().unwrap(),
-      &"1337".to_string().into_bytes(),
-    );
-    assert_eq!(
-      iter.next().unwrap().as_ref().unwrap(),
-      &"42".to_string().into_bytes(),
-    );
-    assert!(iter.next().is_none());
-  }
-
+  /// Verify that ping requests are acknowledged by pongs.
   #[test(tokio::test)]
   async fn ping_pong() {
     async fn test(mut stream: WebSocketStream) -> Result<(), WebSocketError> {
@@ -531,7 +501,7 @@ mod tests {
       stream.send(WebSocketMessage::Ping(Vec::new())).await?;
       // Expect Pong.
       assert_eq!(
-        StreamExt::next(&mut stream).await.unwrap()?,
+        stream.next().await.unwrap()?,
         WebSocketMessage::Pong(Vec::new()),
       );
 
@@ -539,13 +509,15 @@ mod tests {
       Ok(())
     }
 
-    mock_stream(test)
+    serve_and_connect(test)
       .await
       .try_for_each(|_| ready(Ok(())))
       .await
       .unwrap();
   }
 
+  /// Check that we report an error when the server fails to respond to
+  /// pings.
   #[test(tokio::test)]
   async fn no_pongs() {
     async fn test(mut stream: WebSocketStream) -> Result<(), WebSocketError> {
@@ -557,8 +529,7 @@ mod tests {
       Ok(())
     }
 
-    let ping = Duration::from_millis(1);
-    let stream = stream_impl::<_>(serve_and_connect(test).await, ping).await;
+    let stream = serve_and_connect(test).await;
     let err = stream.try_for_each(|_| ready(Ok(()))).await.unwrap_err();
     assert_eq!(
       err.to_string(),
@@ -566,8 +537,9 @@ mod tests {
     );
   }
 
+  /// Check that messages sent by the server are transported correctly.
   #[test(tokio::test)]
-  async fn no_messages_dropped() {
+  async fn send_messages() {
     async fn test(mut stream: WebSocketStream) -> Result<(), WebSocketError> {
       stream
         .send(WebSocketMessage::Text("42".to_string()))
@@ -580,14 +552,14 @@ mod tests {
       Ok(())
     }
 
-    let ping = Duration::from_millis(10);
-    let stream = stream_impl::<_>(serve_and_connect(test).await, ping).await;
-    let stream = StreamExt::map(stream, |r| r.unwrap());
-    let stream = StreamExt::map(stream, |r| r);
-    let messages = StreamExt::collect::<Vec<_>>(stream).await;
+    let stream = serve_and_connect(test).await;
+    let messages = stream.try_collect::<Vec<_>>().await.unwrap();
     assert_eq!(
       messages,
-      vec!["42".to_string().into_bytes(), "43".to_string().into_bytes()]
+      vec![
+        Message::Text("42".to_string()),
+        Message::Text("43".to_string())
+      ]
     );
   }
 }
