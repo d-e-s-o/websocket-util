@@ -2,6 +2,7 @@ Unreleased
 ----------
 - Introduced `Wrapper` type providing both a stream and a sink interface
   for websocket channels
+  - Removed legacy `stream` function
 
 
 0.9.0

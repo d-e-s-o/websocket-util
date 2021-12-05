@@ -3,30 +3,18 @@
 
 use std::io;
 use std::pin::Pin;
-use std::str::from_utf8;
 use std::task::Poll as StdPoll;
 use std::time::Duration;
 
-use futures::future::ready;
-use futures::future::select;
-use futures::future::Either;
-use futures::pin_mut;
-use futures::stream::unfold;
 use futures::task::Context;
 use futures::task::Poll;
 use futures::Sink;
-use futures::SinkExt;
 use futures::Stream;
-use futures::StreamExt;
-use futures::TryStreamExt;
 
 use tokio::time::interval;
 use tokio::time::Interval;
 use tokio_tungstenite::tungstenite::Error as WebSocketError;
 use tokio_tungstenite::tungstenite::Message as WebSocketMessage;
-
-use tracing::debug;
-use tracing::trace;
 
 
 /// An enum encapsulating the state machine to handle pings to the
@@ -42,131 +30,6 @@ enum Ping {
   /// woken up as part of our interval that means no pong was received
   /// and the connection to the server is broken.
   Pending,
-}
-
-
-/// Handle a single message from the stream.
-async fn handle_msg<S>(
-  result: Option<Result<WebSocketMessage, WebSocketError>>,
-  stream: &mut S,
-) -> Result<(Option<Vec<u8>>, bool), WebSocketError>
-where
-  S: Sink<WebSocketMessage, Error = WebSocketError> + Unpin,
-{
-  let result = result.ok_or(WebSocketError::AlreadyClosed)?;
-  let msg = result?;
-
-  trace!(recv_msg = debug(&msg));
-
-  match msg {
-    WebSocketMessage::Close(_) => Ok((None, true)),
-    WebSocketMessage::Text(txt) => {
-      debug!(text = display(&txt));
-      Ok((Some(txt.into_bytes()), false))
-    },
-    WebSocketMessage::Binary(dat) => {
-      match from_utf8(&dat) {
-        Ok(s) => debug!(data = display(&s)),
-        Err(b) => debug!(data = display(&b)),
-      }
-      Ok((Some(dat), false))
-    },
-    WebSocketMessage::Ping(dat) => {
-      let msg = WebSocketMessage::Pong(dat);
-      trace!(send_msg = debug(&msg));
-      // TODO: We should probably spawn a task here.
-      stream.send(msg).await?;
-      Ok((None, false))
-    },
-    WebSocketMessage::Pong(_) => Ok((None, false)),
-  }
-}
-
-async fn stream_impl<S>(
-  stream: S,
-  ping_interval: Duration,
-) -> impl Stream<Item = Result<Vec<u8>, WebSocketError>>
-where
-  S: Sink<WebSocketMessage, Error = WebSocketError>,
-  S: Stream<Item = Result<WebSocketMessage, WebSocketError>> + Unpin,
-{
-  let mut ping = Ping::NotNeeded;
-  let pinger = interval(ping_interval);
-  let (sink, stream) = stream.split();
-
-  unfold((false, (stream, sink, pinger)), move |(closed, (mut stream, mut sink, mut pinger))| {
-    async move {
-      if closed {
-        None
-      } else {
-        // Note that we could use `futures::stream::select` over
-        // manually "polling" each stream, but that has the downside
-        // that we cannot bail out quickly if the websocket stream
-        // gets exhausted.
-        let mut next_msg = StreamExt::next(&mut stream);
-
-        let (result, closed) = loop {
-          let next_ping = pinger.tick();
-          pin_mut!(next_ping);
-
-          let either = select(next_msg, next_ping).await;
-          match either {
-            #[allow(unused_assignments)]
-            Either::Left((result, _next)) => {
-              // We just got a message from the server. Whatever it was,
-              // it means our connection is still standing, so no need
-              // to ask for a ping.
-              ping = Ping::NotNeeded;
-
-              let result = handle_msg(result, &mut sink).await;
-              let closed = result.as_ref().map(|(_, closed)| *closed).unwrap_or(false);
-              // Note that because we do nothing with `_next` we may
-              // actually drop a ping. But we do not consider that
-              // critical.
-              break (result, closed)
-            },
-            Either::Right((_ping, next)) => {
-              ping = match ping {
-                Ping::NotNeeded => Ping::Needed,
-                Ping::Needed => {
-                  let msg = WebSocketMessage::Ping(Vec::new());
-                  trace!(send_msg = debug(&msg));
-
-                  let result = sink.send(msg).await;
-                  if let Err(err) = result {
-                    break (Err(err), false)
-                  }
-                  Ping::Pending
-                },
-                Ping::Pending => {
-                  let err = WebSocketError::Io(io::Error::new(
-                    io::ErrorKind::Other,
-                    "server failed to respond to pings",
-                  ));
-                  break (Err(err), true)
-                },
-              };
-
-              next_msg = next;
-            },
-          }
-        };
-
-        Some((result, (closed, (stream, sink, pinger))))
-      }
-    }
-  })
-  .try_filter_map(|(res, _)| ready(Ok(res)))
-}
-
-/// Create a stream of higher level primitives out of a client, honoring
-/// and filtering websocket control messages such as `Ping` and `Close`.
-pub async fn stream<S>(stream: S) -> impl Stream<Item = Result<Vec<u8>, WebSocketError>>
-where
-  S: Sink<WebSocketMessage, Error = WebSocketError>,
-  S: Stream<Item = Result<WebSocketMessage, WebSocketError>> + Unpin,
-{
-  stream_impl(stream, Duration::from_secs(30)).await
 }
 
 
@@ -426,6 +289,11 @@ mod tests {
   use super::*;
 
   use std::future::Future;
+
+  use futures::future::ready;
+  use futures::SinkExt as _;
+  use futures::StreamExt as _;
+  use futures::TryStreamExt as _;
 
   use test_log::test;
 

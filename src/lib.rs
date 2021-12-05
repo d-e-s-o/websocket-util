@@ -56,6 +56,5 @@ pub use tokio_tungstenite::tungstenite;
 #[cfg(any(test, feature = "test"))]
 pub mod test;
 
-pub use stream::stream;
 pub use stream::Message;
 pub use stream::Wrapper;
