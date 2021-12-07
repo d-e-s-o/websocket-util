@@ -47,7 +47,7 @@
 //! A crate for converting data on a WebSocket channel into a stream of
 //! JSON decoded objects.
 
-mod stream;
+mod wrap;
 
 /// Re-export of the tungstenite version the crate interfaces with.
 pub use tokio_tungstenite::tungstenite;
@@ -56,5 +56,5 @@ pub use tokio_tungstenite::tungstenite;
 #[cfg(any(test, feature = "test"))]
 pub mod test;
 
-pub use stream::Message;
-pub use stream::Wrapper;
+pub use wrap::Message;
+pub use wrap::Wrapper;
