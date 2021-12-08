@@ -47,7 +47,9 @@
 //! A crate for converting data on a WebSocket channel into a stream of
 //! JSON decoded objects.
 
-mod wrap;
+/// Functionality for wrapping a websocket stream, adding automated
+/// support for handling of control messages.
+pub mod wrap;
 
 /// Re-export of the tungstenite version the crate interfaces with.
 pub use tokio_tungstenite::tungstenite;
@@ -55,6 +57,3 @@ pub use tokio_tungstenite::tungstenite;
 /// A module providing functionality for testing WebSocket streams.
 #[cfg(any(test, feature = "test"))]
 pub mod test;
-
-pub use wrap::Message;
-pub use wrap::Wrapper;
