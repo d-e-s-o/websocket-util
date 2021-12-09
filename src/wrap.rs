@@ -1,6 +1,7 @@
 // Copyright (C) 2019-2021 Daniel Mueller <deso@posteo.net>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::fmt::Debug;
 use std::io;
 use std::pin::Pin;
 use std::task::Poll as StdPoll;
@@ -15,6 +16,10 @@ use tokio::time::interval;
 use tokio::time::Interval;
 use tokio_tungstenite::tungstenite::Error as WebSocketError;
 use tokio_tungstenite::tungstenite::Message as WebSocketMessage;
+
+use tracing::debug;
+use tracing::error;
+use tracing::trace;
 
 
 /// An enum encapsulating the state machine to handle pings to the
@@ -72,6 +77,7 @@ impl<M> SendMessageState<M> {
   fn poll<S>(&mut self, sink: Pin<&mut S>, ctx: &mut Context<'_>) -> Poll<Result<(), S::Error>>
   where
     S: Sink<M> + Unpin,
+    M: Debug,
   {
     let mut sink = Pin::get_mut(sink);
 
@@ -89,6 +95,10 @@ impl<M> SendMessageState<M> {
 
         let message = message.take();
         *self = Self::Unused;
+        debug!(
+          channel = debug(sink as *const _),
+          send_msg = debug(&message)
+        );
 
         if let Some(message) = message {
           if let Err(err) = Pin::new(&mut sink).start_send(message) {
@@ -99,11 +109,47 @@ impl<M> SendMessageState<M> {
         Poll::Ready(Ok(()))
       },
       Self::Flush => {
+        trace!(channel = debug(sink as *const _), msg = "flushing");
         *self = Self::Unused;
         Pin::new(&mut sink).poll_flush(ctx)
       },
     }
   }
+
+  /// Set a message to be sent
+  fn set(&mut self, message: M) {
+    *self = Self::Pending(Some(message))
+  }
+}
+
+/// A helper function for changing some message state that logs
+/// issues caused by a message "overrun", i.e., a message not having
+/// been sent or flushed yet but an overwrite being requested already.
+/// In all likelihood, such errors are caused by a misconfiguration on
+/// the user side, i.e., when an extremely small ping interval is set.
+fn set_message<S, M>(channel: &S, message_state: &mut SendMessageState<M>, message: M)
+where
+  M: Debug,
+{
+  match message_state {
+    SendMessageState::Unused => (),
+    SendMessageState::Pending(old_message) => {
+      debug!(
+        channel = debug(channel as *const _),
+        send_msg_old = debug(&old_message),
+        send_msg_new = debug(&message),
+        msg = "message overrun; last message has not been sent"
+      );
+    },
+    SendMessageState::Flush => {
+      debug!(
+        channel = debug(channel as *const _),
+        msg = "message overrun; last message has not been flushed"
+      );
+    },
+  }
+
+  message_state.set(message);
 }
 
 
@@ -175,26 +221,37 @@ where
         // infer that we had activity in said interval already.
         this.ping_state = match this.ping_state {
           Ping::NotNeeded => {
+            trace!(
+              channel = debug(&this.inner as *const _),
+              msg = "skipping ping due to activity"
+            );
             // If anything caused our ping state to change to
             // `NotNeeded` (from the last time we set it to `Needed`)
             // then just change it back to `Needed`.
             Ping::Needed
           },
           Ping::Needed => {
+            trace!(
+              channel = debug(&this.inner as *const _),
+              msg = "sending ping"
+            );
             // The ping state is still `Needed`, which is what we set it
             // to at the last interval. We need to make sure to actually
             // send a ping over the wire now to check whether our
             // connection is still alive.
             let message = WebSocketMessage::Ping(Vec::new());
-            // TODO: What happens if our previous ping has not been sent
-            //       at this point?
-            this.ping = SendMessageState::Pending(Some(message));
+            set_message(&this.inner, &mut this.ping, message);
+
             if let Poll::Ready(Err(err)) = this.ping.poll(Pin::new(&mut this.inner), ctx) {
               return Poll::Ready(Some(Err(err)))
             }
             Ping::Pending
           },
           Ping::Pending => {
+            error!(
+              channel = debug(&this.inner as *const _),
+              msg = "server failed to respond to pings"
+            );
             // We leave it up to clients to decide how to handle missed
             // pings. But in order to not end up in an endless error
             // cycle in case the client does not care, clear our ping
@@ -225,6 +282,10 @@ where
         },
         Poll::Ready(Some(Err(err))) => break Poll::Ready(Some(Err(err))),
         Poll::Ready(Some(Ok(message))) => {
+          debug!(
+            channel = debug(&this.inner as *const _),
+            recv_msg = debug(&message)
+          );
           this.ping_state = Ping::NotNeeded;
 
           match message {
@@ -233,9 +294,7 @@ where
             WebSocketMessage::Ping(data) => {
               // Respond with a pong.
               let message = WebSocketMessage::Pong(data);
-              // TODO: What happens if our previous pong has not been sent
-              //       at this point?
-              this.pong = SendMessageState::Pending(Some(message));
+              set_message(&this.inner, &mut this.pong, message);
 
               if let Poll::Ready(Err(err)) = this.pong.poll(Pin::new(&mut this.inner), ctx) {
                 return Poll::Ready(Some(Err(err)))
@@ -271,10 +330,16 @@ where
   }
 
   fn start_send(mut self: Pin<&mut Self>, message: Message) -> Result<(), Self::Error> {
-    Pin::new(&mut self.inner).start_send(message.into())
+    let message = message.into();
+    debug!(
+      channel = debug(&self.inner as *const _),
+      send_msg = debug(&message)
+    );
+    Pin::new(&mut self.inner).start_send(message)
   }
 
   fn poll_flush(mut self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    trace!(channel = debug(&self.inner as *const _), msg = "flushing");
     Pin::new(&mut self.inner).poll_flush(ctx)
   }
 
