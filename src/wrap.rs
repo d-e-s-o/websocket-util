@@ -360,6 +360,10 @@ mod tests {
   use futures::StreamExt as _;
   use futures::TryStreamExt as _;
 
+  use rand::seq::IteratorRandom as _;
+  use rand::thread_rng;
+  use rand::Rng as _;
+
   use test_log::test;
 
   use tokio::time::sleep;
@@ -494,5 +498,55 @@ mod tests {
         Message::Text("43".to_string())
       ]
     );
+  }
+
+  /// Stress test our `Wrapper` type's `Stream` part by sending
+  /// excessive amount of messages through it.
+  #[test(tokio::test)]
+  #[ignore = "stress test; test takes a long time"]
+  async fn stress_stream() {
+    async fn test(mut stream: WebSocketStream) -> Result<(), WebSocketError> {
+      fn random_buf() -> Vec<u8> {
+        let len = (0..32).choose(&mut thread_rng()).unwrap();
+        let mut vec = Vec::new();
+        vec.extend((0..len).map(|_| thread_rng().gen::<u8>()));
+        vec
+      }
+
+      for _ in 0..50000 {
+        let message = match (0..5).choose(&mut thread_rng()).unwrap() {
+          0 => WebSocketMessage::Pong(random_buf()),
+          // Note that we can't really spam `Ping` messages here. The
+          // server may actually send them itself and so if the server
+          // sends one, then "we" send one immediately after, we may
+          // drop the first pong response on the floor and just send the
+          // second one. However, because the payloads do not match the
+          // server may conclude that something was amiss and terminate
+          // the connection.
+          i => {
+            if i & 0x1 == 0 {
+              let len = (0..32).choose(&mut thread_rng()).unwrap();
+              let mut string = String::new();
+              string.extend((0..len).map(|_| thread_rng().gen::<char>()));
+
+              WebSocketMessage::Text(string)
+            } else {
+              WebSocketMessage::Binary(random_buf())
+            }
+          },
+        };
+
+        stream.send(message).await?;
+      }
+
+      stream.send(WebSocketMessage::Close(None)).await?;
+      Ok(())
+    }
+
+    serve_and_connect(test)
+      .await
+      .try_for_each(|_| ready(Ok(())))
+      .await
+      .unwrap();
   }
 }
