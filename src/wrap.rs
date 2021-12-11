@@ -74,7 +74,7 @@ enum SendMessageState<M> {
 
 impl<M> SendMessageState<M> {
   /// Attempt to advance the message state by one step.
-  fn poll<S>(&mut self, sink: Pin<&mut S>, ctx: &mut Context<'_>) -> Poll<Result<(), S::Error>>
+  fn advance<S>(&mut self, sink: Pin<&mut S>, ctx: &mut Context<'_>) -> Result<(), S::Error>
   where
     S: Sink<M> + Unpin,
     M: Debug,
@@ -82,14 +82,14 @@ impl<M> SendMessageState<M> {
     let mut sink = Pin::get_mut(sink);
 
     match self {
-      Self::Unused => Poll::Ready(Ok(())),
+      Self::Unused => Ok(()),
       Self::Pending(message) => {
         match Pin::new(&mut sink).poll_ready(ctx) {
-          Poll::Pending => return Poll::Pending,
+          Poll::Pending => return Ok(()),
           Poll::Ready(Ok(())) => (),
           Poll::Ready(Err(err)) => {
             *self = Self::Unused;
-            return Poll::Ready(Err(err))
+            return Err(err)
           },
         }
 
@@ -101,17 +101,19 @@ impl<M> SendMessageState<M> {
         );
 
         if let Some(message) = message {
-          if let Err(err) = Pin::new(&mut sink).start_send(message) {
-            return Poll::Ready(Err(err))
-          }
+          Pin::new(&mut sink).start_send(message)?;
           *self = Self::Flush;
         }
-        Poll::Ready(Ok(()))
+        Ok(())
       },
       Self::Flush => {
         trace!(channel = debug(sink as *const _), msg = "flushing");
         *self = Self::Unused;
-        Pin::new(&mut sink).poll_flush(ctx)
+        if let Poll::Ready(Err(err)) = Pin::new(&mut sink).poll_flush(ctx) {
+          Err(err)
+        } else {
+          Ok(())
+        }
       },
     }
   }
@@ -179,15 +181,12 @@ impl Pinger {
   }
 
   /// Attempt to advance the ping state by one step.
-  fn poll<S>(&mut self, sink: Pin<&mut S>, ctx: &mut Context<'_>) -> Poll<Result<(), S::Error>>
+  fn advance<S>(&mut self, sink: Pin<&mut S>, ctx: &mut Context<'_>) -> Result<(), S::Error>
   where
     S: Sink<WebSocketMessage, Error = WebSocketError> + Unpin,
   {
     let sink = Pin::get_mut(sink);
-
-    if let Poll::Ready(Err(err)) = self.ping.poll(Pin::new(sink), ctx) {
-      return Poll::Ready(Err(err))
-    }
+    self.ping.advance(Pin::new(sink), ctx)?;
 
     match self.next_ping.poll_tick(ctx) {
       StdPoll::Ready(_) => {
@@ -215,9 +214,7 @@ impl Pinger {
             let message = WebSocketMessage::Ping(Vec::new());
             set_message(sink, &mut self.ping, message);
 
-            if let Poll::Ready(Err(err)) = self.ping.poll(Pin::new(sink), ctx) {
-              return Poll::Ready(Err(err))
-            }
+            self.ping.advance(Pin::new(sink), ctx)?;
             Ping::Pending
           },
           Ping::Pending => {
@@ -235,12 +232,12 @@ impl Pinger {
               io::ErrorKind::Other,
               "server failed to respond to pings",
             ));
-            return Poll::Ready(Err(err))
+            return Err(err)
           },
         };
-        Poll::Ready(Ok(()))
+        Ok(())
       },
-      StdPoll::Pending => Poll::Ready(Ok(())),
+      StdPoll::Pending => Ok(()),
     }
   }
 
@@ -296,11 +293,11 @@ where
     let this = Pin::get_mut(self);
 
     // Start off by trying to advance any sending of pings and pongs.
-    if let Poll::Ready(Err(err)) = this.pong.poll(Pin::new(&mut this.inner), ctx) {
+    if let Err(err) = this.pong.advance(Pin::new(&mut this.inner), ctx) {
       return Poll::Ready(Some(Err(err)))
     }
 
-    if let Poll::Ready(Err(err)) = this.ping.poll(Pin::new(&mut this.inner), ctx) {
+    if let Err(err) = this.ping.advance(Pin::new(&mut this.inner), ctx) {
       return Poll::Ready(Some(Err(err)))
     }
 
@@ -331,7 +328,7 @@ where
               let message = WebSocketMessage::Pong(data);
               set_message(&this.inner, &mut this.pong, message);
 
-              if let Poll::Ready(Err(err)) = this.pong.poll(Pin::new(&mut this.inner), ctx) {
+              if let Err(err) = this.pong.advance(Pin::new(&mut this.inner), ctx) {
                 return Poll::Ready(Some(Err(err)))
               }
             },
