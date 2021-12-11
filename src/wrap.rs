@@ -153,6 +153,106 @@ where
 }
 
 
+/// An internally used type encapsulating the logic of sending pings at
+/// regular intervals (if needed).
+#[derive(Debug)]
+struct Pinger {
+  /// The state we maintain for sending pings.
+  ping: SendMessageState<WebSocketMessage>,
+  /// An object keeping track of when we should be sending the next
+  /// ping to the server.
+  next_ping: Interval,
+  /// State helping us keep track of pings that we want to send to the
+  /// server.
+  ping_state: Ping,
+}
+
+impl Pinger {
+  /// Create a new `Pinger` object for sending pings spaced by
+  /// `ping_interval`.
+  fn new(ping_interval: Duration) -> Self {
+    Self {
+      ping: SendMessageState::Unused,
+      next_ping: interval(ping_interval),
+      ping_state: Ping::NotNeeded,
+    }
+  }
+
+  /// Attempt to advance the ping state by one step.
+  fn poll<S>(&mut self, sink: Pin<&mut S>, ctx: &mut Context<'_>) -> Poll<Result<(), S::Error>>
+  where
+    S: Sink<WebSocketMessage, Error = WebSocketError> + Unpin,
+  {
+    let sink = Pin::get_mut(sink);
+
+    if let Poll::Ready(Err(err)) = self.ping.poll(Pin::new(sink), ctx) {
+      return Poll::Ready(Err(err))
+    }
+
+    match self.next_ping.poll_tick(ctx) {
+      StdPoll::Ready(_) => {
+        // We are due sending a ping according to the user's specified
+        // ping interval. Check the existing ping state to decide what
+        // to actually do. We may not need to send a ping if we can
+        // infer that we had activity in said interval already.
+        self.ping_state = match self.ping_state {
+          Ping::NotNeeded => {
+            trace!(
+              channel = debug(sink as *const _),
+              msg = "skipping ping due to activity"
+            );
+            // If anything caused our ping state to change to
+            // `NotNeeded` (from the last time we set it to `Needed`)
+            // then just change it back to `Needed`.
+            Ping::Needed
+          },
+          Ping::Needed => {
+            trace!(channel = debug(sink as *const _), msg = "sending ping");
+            // The ping state is still `Needed`, which is what we set it
+            // to at the last interval. We need to make sure to actually
+            // send a ping over the wire now to check whether our
+            // connection is still alive.
+            let message = WebSocketMessage::Ping(Vec::new());
+            set_message(sink, &mut self.ping, message);
+
+            if let Poll::Ready(Err(err)) = self.ping.poll(Pin::new(sink), ctx) {
+              return Poll::Ready(Err(err))
+            }
+            Ping::Pending
+          },
+          Ping::Pending => {
+            error!(
+              channel = debug(sink as *const _),
+              msg = "server failed to respond to pings"
+            );
+            // We leave it up to clients to decide how to handle missed
+            // pings. But in order to not end up in an endless error
+            // cycle in case the client does not care, clear our ping
+            // state.
+            self.ping_state = Ping::Needed;
+
+            let err = WebSocketError::Io(io::Error::new(
+              io::ErrorKind::Other,
+              "server failed to respond to pings",
+            ));
+            return Poll::Ready(Err(err))
+          },
+        };
+        Poll::Ready(Ok(()))
+      },
+      StdPoll::Pending => Poll::Ready(Ok(())),
+    }
+  }
+
+  /// Register the fact that activity occurred over the associated
+  /// websocket channel, meaning that there is no need to ping the
+  /// server this interval.
+  fn activity(&mut self) {
+    self.ping_state = Ping::NotNeeded;
+  }
+}
+
+
 /// A wrapped websocket channel that handles responding to pings, sends
 /// pings to check for liveness of server, and filters out websocket
 /// control messages in the process.
@@ -164,13 +264,7 @@ pub struct Wrapper<S> {
   /// The state we maintain for sending pongs over our internal sink.
   pong: SendMessageState<WebSocketMessage>,
   /// The state we maintain for sending pings over our internal sink.
-  ping: SendMessageState<WebSocketMessage>,
-  /// An object keeping track of when we should be sending the next
-  /// ping to the server.
-  next_ping: Interval,
-  /// State helping us keep track of pings that we want to send to the
-  /// server.
-  ping_state: Ping,
+  ping: Pinger,
 }
 
 impl<S> Wrapper<S> {
@@ -185,9 +279,7 @@ impl<S> Wrapper<S> {
     Self {
       inner,
       pong: SendMessageState::Unused,
-      ping: SendMessageState::Unused,
-      next_ping: interval(ping_interval),
-      ping_state: Ping::NotNeeded,
+      ping: Pinger::new(ping_interval),
     }
   }
 }
@@ -212,63 +304,6 @@ where
       return Poll::Ready(Some(Err(err)))
     }
 
-    // Next check whether we need to send a new ping to the server.
-    match this.next_ping.poll_tick(ctx) {
-      StdPoll::Ready(_) => {
-        // We are due sending a ping according to the user's specified
-        // ping interval. Check the existing ping state to decide what
-        // to actually do. We may not need to send a ping if we can
-        // infer that we had activity in said interval already.
-        this.ping_state = match this.ping_state {
-          Ping::NotNeeded => {
-            trace!(
-              channel = debug(&this.inner as *const _),
-              msg = "skipping ping due to activity"
-            );
-            // If anything caused our ping state to change to
-            // `NotNeeded` (from the last time we set it to `Needed`)
-            // then just change it back to `Needed`.
-            Ping::Needed
-          },
-          Ping::Needed => {
-            trace!(
-              channel = debug(&this.inner as *const _),
-              msg = "sending ping"
-            );
-            // The ping state is still `Needed`, which is what we set it
-            // to at the last interval. We need to make sure to actually
-            // send a ping over the wire now to check whether our
-            // connection is still alive.
-            let message = WebSocketMessage::Ping(Vec::new());
-            set_message(&this.inner, &mut this.ping, message);
-
-            if let Poll::Ready(Err(err)) = this.ping.poll(Pin::new(&mut this.inner), ctx) {
-              return Poll::Ready(Some(Err(err)))
-            }
-            Ping::Pending
-          },
-          Ping::Pending => {
-            error!(
-              channel = debug(&this.inner as *const _),
-              msg = "server failed to respond to pings"
-            );
-            // We leave it up to clients to decide how to handle missed
-            // pings. But in order to not end up in an endless error
-            // cycle in case the client does not care, clear our ping
-            // state.
-            this.ping_state = Ping::Needed;
-
-            let err = WebSocketError::Io(io::Error::new(
-              io::ErrorKind::Other,
-              "server failed to respond to pings",
-            ));
-            return Poll::Ready(Some(Err(err)))
-          },
-        };
-      },
-      StdPoll::Pending => (),
-    }
-
     loop {
       match Pin::new(&mut this.inner).poll_next(ctx) {
         Poll::Pending => {
@@ -286,7 +321,7 @@ where
             channel = debug(&this.inner as *const _),
             recv_msg = debug(&message)
           );
-          this.ping_state = Ping::NotNeeded;
+          let () = this.ping.activity();
 
           match message {
             WebSocketMessage::Text(data) => break Poll::Ready(Some(Ok(Message::Text(data)))),
