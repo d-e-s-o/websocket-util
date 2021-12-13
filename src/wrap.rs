@@ -3,6 +3,7 @@
 
 use std::fmt::Debug;
 use std::io;
+use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::Poll as StdPoll;
 use std::time::Duration;
@@ -250,6 +251,42 @@ impl Pinger {
 }
 
 
+/// A type helping with the construction of `Wrapper` objects.
+#[derive(Debug)]
+pub struct Builder<S> {
+  /// The interval at which to send pings.
+  ping_interval: Duration,
+  /// Phantom data for the websocket type.
+  _phantom: PhantomData<S>,
+}
+
+impl<S> Builder<S> {
+  /// Overwrite the default ping interval of 30s with a custom one.
+  pub fn set_ping_interval(mut self, interval: Duration) -> Builder<S> {
+    self.ping_interval = interval;
+    self
+  }
+
+  /// Build the final `Wrapper` wrapping the provided websocket channel.
+  pub fn build(self, channel: S) -> Wrapper<S> {
+    Wrapper {
+      inner: channel,
+      pong: SendMessageState::Unused,
+      ping: Pinger::new(self.ping_interval),
+    }
+  }
+}
+
+impl<S> Default for Builder<S> {
+  fn default() -> Self {
+    Self {
+      ping_interval: Duration::from_secs(30),
+      _phantom: PhantomData,
+    }
+  }
+}
+
+
 /// A wrapped websocket channel that handles responding to pings, sends
 /// pings to check for liveness of server, and filters out websocket
 /// control messages in the process.
@@ -265,19 +302,9 @@ pub struct Wrapper<S> {
 }
 
 impl<S> Wrapper<S> {
-  /// Create a `Wrapper` object wrapping the provided stream that uses
-  /// the default ping interval (30s).
-  pub fn with_default(inner: S) -> Self {
-    Self::new(inner, Duration::from_secs(30))
-  }
-
-  /// Create a `Wrapper` object wrapping the provided stream.
-  pub fn new(inner: S, ping_interval: Duration) -> Self {
-    Self {
-      inner,
-      pong: SendMessageState::Unused,
-      ping: Pinger::new(ping_interval),
-    }
+  /// Create a `Builder` for creating a customized `Wrapper`.
+  pub fn builder() -> Builder<S> {
+    Builder::default()
   }
 }
 
@@ -422,7 +449,7 @@ mod tests {
 
     let (stream, _) = connect_async(url).await.unwrap();
     let ping = Duration::from_millis(10);
-    Wrapper::new(stream, ping)
+    Wrapper::builder().set_ping_interval(ping).build(stream)
   }
 
   /// Check that our `Wrapper` behaves correctly if no messages are sent
