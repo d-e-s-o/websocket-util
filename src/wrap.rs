@@ -254,15 +254,16 @@ impl Pinger {
 /// A type helping with the construction of `Wrapper` objects.
 #[derive(Debug)]
 pub struct Builder<S> {
-  /// The interval at which to send pings.
-  ping_interval: Duration,
+  /// The interval at which to send pings. A value of `None` disables
+  /// sending of pings.
+  ping_interval: Option<Duration>,
   /// Phantom data for the websocket type.
   _phantom: PhantomData<S>,
 }
 
 impl<S> Builder<S> {
   /// Overwrite the default ping interval of 30s with a custom one.
-  pub fn set_ping_interval(mut self, interval: Duration) -> Builder<S> {
+  pub fn set_ping_interval(mut self, interval: Option<Duration>) -> Builder<S> {
     self.ping_interval = interval;
     self
   }
@@ -272,7 +273,7 @@ impl<S> Builder<S> {
     Wrapper {
       inner: channel,
       pong: Some(SendMessageState::Unused),
-      ping: Some(Pinger::new(self.ping_interval)),
+      ping: self.ping_interval.map(Pinger::new),
     }
   }
 }
@@ -280,7 +281,7 @@ impl<S> Builder<S> {
 impl<S> Default for Builder<S> {
   fn default() -> Self {
     Self {
-      ping_interval: Duration::from_secs(30),
+      ping_interval: Some(Duration::from_secs(30)),
       _phantom: PhantomData,
     }
   }
@@ -432,6 +433,7 @@ mod tests {
   use test_log::test;
 
   use tokio::time::sleep;
+  use tokio::time::timeout;
 
   use tokio_tungstenite::connect_async;
   use tokio_tungstenite::tungstenite::error::ProtocolError;
@@ -445,7 +447,10 @@ mod tests {
   /// Instantiate a websocket server serving data provided by the
   /// given function, connect to said server, and return the resulting
   /// wrapped stream.
-  async fn serve_and_connect<F, R>(f: F) -> Wrapper<WebSocketStream>
+  async fn serve_and_connect_with_builder<F, R>(
+    builder: Builder<WebSocketStream>,
+    f: F,
+  ) -> Wrapper<WebSocketStream>
   where
     F: FnOnce(WebSocketStream) -> R + Send + Sync + 'static,
     R: Future<Output = Result<(), WebSocketError>> + Send + Sync + 'static,
@@ -454,8 +459,20 @@ mod tests {
     let url = Url::parse(&format!("ws://{}", addr.to_string())).unwrap();
 
     let (stream, _) = connect_async(url).await.unwrap();
-    let ping = Duration::from_millis(10);
-    Wrapper::builder().set_ping_interval(ping).build(stream)
+    builder.build(stream)
+  }
+
+  /// Create a websocket server and connect to it, similar to
+  /// `serve_and_connect_with_builder`, but use a pre-defined builder
+  /// with a 10ms ping interval.
+  async fn serve_and_connect<F, R>(f: F) -> Wrapper<WebSocketStream>
+  where
+    F: FnOnce(WebSocketStream) -> R + Send + Sync + 'static,
+    R: Future<Output = Result<(), WebSocketError>> + Send + Sync + 'static,
+  {
+    let ping = Some(Duration::from_millis(10));
+    let builder = Wrapper::builder().set_ping_interval(ping);
+    serve_and_connect_with_builder(builder, f).await
   }
 
   /// Check that our `Wrapper` behaves correctly if no messages are sent
@@ -518,10 +535,56 @@ mod tests {
       .unwrap();
   }
 
+  /// Verify that pings are being sent by our `Wrapper`.
+  #[test(tokio::test)]
+  async fn pings_are_sent() {
+    async fn test(mut stream: WebSocketStream) -> Result<(), WebSocketError> {
+      // Check that we receive Ping messages. The server will take care
+      // of responding to them behind our back already, so there is
+      // nothing else for us to be done.
+      for _ in 0..2 {
+        assert!(matches!(
+          stream.next().await.unwrap()?,
+          WebSocketMessage::Ping(_)
+        ));
+      }
+
+      stream.send(WebSocketMessage::Close(None)).await?;
+      Ok(())
+    }
+
+    serve_and_connect(test)
+      .await
+      .try_for_each(|_| ready(Ok(())))
+      .await
+      .unwrap();
+  }
+
+  /// Verify that no pings are being sent by our `Wrapper` when the
+  /// feature is disabled.
+  #[test(tokio::test)]
+  async fn no_pings_are_sent_when_disabled() {
+    async fn test(stream: WebSocketStream) -> Result<(), WebSocketError> {
+      let mut stream = stream.fuse();
+      let future = stream.select_next_some();
+      assert!(timeout(Duration::from_millis(20), future).await.is_err());
+
+      stream.send(WebSocketMessage::Close(None)).await?;
+      Ok(())
+    }
+
+    let builder = Wrapper::builder().set_ping_interval(None);
+    serve_and_connect_with_builder(builder, test)
+      .await
+      .try_for_each(|_| ready(Ok(())))
+      .await
+      .unwrap();
+  }
+
   /// Check that we report an error when the server fails to respond to
   /// pings.
   #[test(tokio::test)]
-  async fn no_pongs() {
+  async fn no_pong_response() {
     async fn test(mut stream: WebSocketStream) -> Result<(), WebSocketError> {
       stream
         .send(WebSocketMessage::Text("test".to_string()))
