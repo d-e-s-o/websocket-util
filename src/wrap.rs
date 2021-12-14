@@ -271,8 +271,8 @@ impl<S> Builder<S> {
   pub fn build(self, channel: S) -> Wrapper<S> {
     Wrapper {
       inner: channel,
-      pong: SendMessageState::Unused,
-      ping: Pinger::new(self.ping_interval),
+      pong: Some(SendMessageState::Unused),
+      ping: Some(Pinger::new(self.ping_interval)),
     }
   }
 }
@@ -296,9 +296,9 @@ pub struct Wrapper<S> {
   /// The wrapped stream & sink.
   inner: S,
   /// The state we maintain for sending pongs over our internal sink.
-  pong: SendMessageState<WebSocketMessage>,
+  pong: Option<SendMessageState<WebSocketMessage>>,
   /// The state we maintain for sending pings over our internal sink.
-  ping: Pinger,
+  ping: Option<Pinger>,
 }
 
 impl<S> Wrapper<S> {
@@ -320,12 +320,16 @@ where
     let this = Pin::get_mut(self);
 
     // Start off by trying to advance any sending of pings and pongs.
-    if let Err(err) = this.pong.advance(Pin::new(&mut this.inner), ctx) {
-      return Poll::Ready(Some(Err(err)))
+    if let Some(pong) = &mut this.pong {
+      if let Err(err) = pong.advance(Pin::new(&mut this.inner), ctx) {
+        return Poll::Ready(Some(Err(err)))
+      }
     }
 
-    if let Err(err) = this.ping.advance(Pin::new(&mut this.inner), ctx) {
-      return Poll::Ready(Some(Err(err)))
+    if let Some(ping) = &mut this.ping {
+      if let Err(err) = ping.advance(Pin::new(&mut this.inner), ctx) {
+        return Poll::Ready(Some(Err(err)))
+      }
     }
 
     loop {
@@ -345,18 +349,20 @@ where
             channel = debug(&this.inner as *const _),
             recv_msg = debug(&message)
           );
-          let () = this.ping.activity();
+          let () = this.ping.as_mut().map(Pinger::activity).unwrap_or(());
 
           match message {
             WebSocketMessage::Text(data) => break Poll::Ready(Some(Ok(Message::Text(data)))),
             WebSocketMessage::Binary(data) => break Poll::Ready(Some(Ok(Message::Binary(data)))),
             WebSocketMessage::Ping(data) => {
-              // Respond with a pong.
-              let message = WebSocketMessage::Pong(data);
-              set_message(&this.inner, &mut this.pong, message);
+              if let Some(pong) = &mut this.pong {
+                // Respond with a pong.
+                let message = WebSocketMessage::Pong(data);
+                set_message(&this.inner, pong, message);
 
-              if let Err(err) = this.pong.advance(Pin::new(&mut this.inner), ctx) {
-                return Poll::Ready(Some(Err(err)))
+                if let Err(err) = pong.advance(Pin::new(&mut this.inner), ctx) {
+                  return Poll::Ready(Some(Err(err)))
+                }
               }
             },
             WebSocketMessage::Pong(_) => {
