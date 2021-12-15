@@ -257,6 +257,8 @@ pub struct Builder<S> {
   /// The interval at which to send pings. A value of `None` disables
   /// sending of pings.
   ping_interval: Option<Duration>,
+  /// Whether or not we send pong replies to ping messages.
+  send_pongs: bool,
   /// Phantom data for the websocket type.
   _phantom: PhantomData<S>,
 }
@@ -268,11 +270,21 @@ impl<S> Builder<S> {
     self
   }
 
+  /// Overwrite the default of sending no pong responses to pings.
+  pub fn set_send_pongs(mut self, enable: bool) -> Builder<S> {
+    self.send_pongs = enable;
+    self
+  }
+
   /// Build the final `Wrapper` wrapping the provided websocket channel.
   pub fn build(self, channel: S) -> Wrapper<S> {
     Wrapper {
       inner: channel,
-      pong: Some(SendMessageState::Unused),
+      pong: if self.send_pongs {
+        Some(SendMessageState::Unused)
+      } else {
+        None
+      },
       ping: self.ping_interval.map(Pinger::new),
     }
   }
@@ -282,6 +294,7 @@ impl<S> Default for Builder<S> {
   fn default() -> Self {
     Self {
       ping_interval: Some(Duration::from_secs(30)),
+      send_pongs: false,
       _phantom: PhantomData,
     }
   }
@@ -512,13 +525,50 @@ mod tests {
       .unwrap();
   }
 
-  /// Verify that ping requests are acknowledged by pongs.
+  /// Verify that ping requests are acknowledged by pongs by the
+  /// underlying server.
   #[test(tokio::test)]
   async fn ping_pong() {
-    async fn test(mut stream: WebSocketStream) -> Result<(), WebSocketError> {
+    async fn test(stream: WebSocketStream) -> Result<(), WebSocketError> {
+      let mut stream = stream.fuse();
+
       // Ping.
       stream.send(WebSocketMessage::Ping(Vec::new())).await?;
       // Expect Pong.
+      assert_eq!(
+        stream.next().await.unwrap()?,
+        WebSocketMessage::Pong(Vec::new()),
+      );
+
+      let future = stream.select_next_some();
+      assert!(timeout(Duration::from_millis(20), future).await.is_err());
+
+      stream.send(WebSocketMessage::Close(None)).await?;
+      Ok(())
+    }
+
+    let builder = Wrapper::builder().set_ping_interval(None);
+    serve_and_connect_with_builder(builder, test)
+      .await
+      .try_for_each(|_| ready(Ok(())))
+      .await
+      .unwrap();
+  }
+
+  /// Verify that ping requests are acknowledged by pongs by the
+  /// underlying server and by our `Wrapper` (if the feature is
+  /// enabled).
+  #[test(tokio::test)]
+  async fn ping_pong_2() {
+    async fn test(mut stream: WebSocketStream) -> Result<(), WebSocketError> {
+      // Ping.
+      stream.send(WebSocketMessage::Ping(Vec::new())).await?;
+      // Expect two Pong messages, one from the underlying server and
+      // another from our `Wrapper`.
+      assert_eq!(
+        stream.next().await.unwrap()?,
+        WebSocketMessage::Pong(Vec::new()),
+      );
       assert_eq!(
         stream.next().await.unwrap()?,
         WebSocketMessage::Pong(Vec::new()),
@@ -528,7 +578,8 @@ mod tests {
       Ok(())
     }
 
-    serve_and_connect(test)
+    let builder = Wrapper::builder().set_send_pongs(true);
+    serve_and_connect_with_builder(builder, test)
       .await
       .try_for_each(|_| ready(Ok(())))
       .await
