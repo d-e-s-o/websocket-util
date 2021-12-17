@@ -155,6 +155,41 @@ where
   message_state.set(message);
 }
 
+use std::fmt::Formatter;
+use std::fmt::Result as FmtResult;
+use std::str::from_utf8 as str_from_utf8;
+
+use tracing::field::debug;
+use tracing::field::DebugValue;
+
+/// A type for displaying a time range in a human readable way.
+struct DebugMessage<'m> {
+  message: &'m WebSocketMessage,
+}
+
+impl<'m> Debug for DebugMessage<'m> {
+  fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+    match self.message {
+      // We could consider also attempting to decode the data passed to
+      // Pings/Pongs and Close messages.
+      WebSocketMessage::Binary(data) => {
+        if let Ok(s) = str_from_utf8(data) {
+          f.debug_tuple("Binary").field(&s).finish()
+        } else {
+          Debug::fmt(self.message, f)
+        }
+      },
+      _ => Debug::fmt(self.message, f),
+    }
+  }
+}
+
+/// Emit a debug representation of a websocket message that takes care
+/// of converting binary messages to string.
+fn debug_message(message: &WebSocketMessage) -> DebugValue<DebugMessage<'_>> {
+  debug(DebugMessage { message })
+}
+
 
 /// An internally used type encapsulating the logic of sending pings at
 /// regular intervals (if needed).
@@ -361,7 +396,7 @@ where
         Poll::Ready(Some(Ok(message))) => {
           debug!(
             channel = debug(&this.inner as *const _),
-            recv_msg = debug(&message)
+            recv_msg = debug_message(&message)
           );
           let () = this.ping.as_mut().map(Pinger::activity).unwrap_or(());
 
@@ -412,7 +447,7 @@ where
     let message = message.into();
     debug!(
       channel = debug(&self.inner as *const _),
-      send_msg = debug(&message)
+      send_msg = debug_message(&message)
     );
     Pin::new(&mut self.inner).start_send(message)
   }
@@ -455,6 +490,25 @@ mod tests {
 
   use crate::test::mock_server;
   use crate::test::WebSocketStream;
+
+
+  /// Check that we can show proper debug representation of websocket
+  /// messages.
+  #[test]
+  fn debug_websocket_message() {
+    let message = WebSocketMessage::Binary(b"this is a test".to_vec());
+    let expected = r#"Binary("this is a test")"#;
+    assert_eq!(format!("{:?}", debug_message(&message)), expected);
+
+    // Also try with some invalid Unicode.
+    let message = WebSocketMessage::Binary([0xf0, 0x90, 0x80].to_vec());
+    let expected = r#"Binary([240, 144, 128])"#;
+    assert_eq!(format!("{:?}", debug_message(&message)), expected);
+
+    let message = WebSocketMessage::Ping(Vec::new());
+    let expected = r#"Ping([])"#;
+    assert_eq!(format!("{:?}", debug_message(&message)), expected);
+  }
 
 
   /// Instantiate a websocket server serving data provided by the
