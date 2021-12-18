@@ -1,5 +1,5 @@
-Unreleased
-----------
+0.10.0
+------
 - Introduced `wrap` module with `Wrapper` type providing both a stream
   and a sink interface for websocket channels
   - Removed legacy `stream` function
