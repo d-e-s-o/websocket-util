@@ -1,3 +1,8 @@
+Unreleased
+----------
+- Bumped minimum supported Rust version to `1.53`
+
+
 0.10.0
 ------
 - Introduced `wrap` module with `Wrapper` type providing both a stream
