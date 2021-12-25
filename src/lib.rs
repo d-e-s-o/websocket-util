@@ -47,6 +47,9 @@
 //! A crate for converting data on a WebSocket channel into a stream of
 //! JSON decoded objects.
 
+/// Logic for associating a subscription-style controller object with a
+/// websocket channel.
+pub mod subscribe;
 /// Functionality for wrapping a websocket stream, adding automated
 /// support for handling of control messages.
 pub mod wrap;

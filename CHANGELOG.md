@@ -1,5 +1,7 @@
 Unreleased
 ----------
+- Introduced `subscribe` module providing building blocks for a
+  subscription scheme on top of a websocket channel
 - Bumped minimum supported Rust version to `1.53`
 
 
