@@ -15,6 +15,7 @@ use futures::channel::oneshot::channel;
 use futures::channel::oneshot::Canceled;
 use futures::channel::oneshot::Sender;
 use futures::sink::SinkExt as _;
+use futures::stream::FusedStream;
 use futures::task::Context;
 use futures::task::Poll;
 use futures::Sink;
@@ -155,6 +156,17 @@ where
 
   fn size_hint(&self) -> (usize, Option<usize>) {
     Stream::size_hint(&self.stream)
+  }
+}
+
+impl<S, M> FusedStream for MessageStream<S, M>
+where
+  S: FusedStream<Item = M> + Unpin,
+  M: Message,
+{
+  #[inline]
+  fn is_terminated(&self) -> bool {
+    self.stream.is_terminated()
   }
 }
 
