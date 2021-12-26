@@ -14,12 +14,16 @@ use std::sync::Mutex;
 use futures::channel::oneshot::channel;
 use futures::channel::oneshot::Canceled;
 use futures::channel::oneshot::Sender;
+use futures::select_biased;
 use futures::sink::SinkExt as _;
 use futures::stream::FusedStream;
 use futures::task::Context;
 use futures::task::Poll;
+use futures::Future;
+use futures::FutureExt as _;
 use futures::Sink;
 use futures::Stream;
+use futures::StreamExt as _;
 
 
 /// An enum for the possible classifications of a message.
@@ -279,17 +283,43 @@ where
 }
 
 
+/// Helper function to drive a [`Subscription`] related future to
+/// completion. The function makes sure to poll the provided stream,
+/// which is assumed to be associated with the `Subscription` that the
+/// future belongs to, so that control messages can be received. Errors
+/// reported by the stream (identified via [`Message::is_error`]) short
+/// circuit and fail the operation immediately.
+pub async fn drive<M, F, S>(future: F, stream: &mut S) -> Result<F::Output, M::UserMessage>
+where
+  M: Message,
+  F: Future + Unpin,
+  S: FusedStream<Item = M::UserMessage> + Unpin,
+{
+  let mut future = future.fuse();
+
+  'l: loop {
+    select_biased! {
+      output = future => break 'l Ok(output),
+      user_message = stream.next() => {
+        if let Some(user_message) = user_message {
+          if M::is_error(&user_message) {
+            break 'l Err(user_message)
+          }
+        }
+      },
+    }
+  }
+}
+
+
 #[cfg(test)]
 mod tests {
   use super::*;
 
   use futures::channel::mpsc::channel;
   use futures::stream::iter;
-  use futures::StreamExt as _;
 
   use test_log::test;
-
-  use tokio::spawn;
 
 
   /// A "dummy" message type used for testing.
@@ -341,19 +371,15 @@ mod tests {
     let (mut send, recv) = channel::<MockMessage<u64>>(16);
     let () = send.send_all(&mut it).await.unwrap();
 
-    let (message_stream, mut subscription) = subscribe(recv, send);
-    // Note that aside from creating a future, this method call actually
-    // adjusts state *immediately*. As such, it needs to happen before
-    // we process all our "mock" messages.
-    let close = subscription.send(MockMessage::Close(42));
-
-    // Make sure that our stream is drained, so that messages are being
-    // "processed".
-    let _ = spawn(message_stream.for_each(|_| async {}));
+    let (mut message_stream, mut subscription) = subscribe(recv, send);
+    let close = subscription.send(MockMessage::Close(42)).boxed_local();
+    let message = drive::<MockMessage<u64>, _, _>(close, &mut message_stream)
+      .await
+      .unwrap()
+      .unwrap();
 
     // We should have received back the first "control" message that we
     // fed into the stream, which has the payload 200.
-    let message = close.await.unwrap();
     assert_eq!(message, Some(Ok(200)));
   }
 
