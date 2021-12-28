@@ -437,4 +437,116 @@ mod tests {
     let vec = message_stream.collect::<Vec<_>>().await;
     assert_eq!(vec, vec![1u64, 4u64]);
   }
+
+
+  impl<T> Message for Result<Result<MockMessage<T>, String>, u64> {
+    type UserMessage = Result<Result<T, String>, u64>;
+    type ControlMessage = u8;
+
+    fn classify(self) -> Classification<Self::UserMessage, Self::ControlMessage> {
+      match self {
+        Ok(Ok(MockMessage::Value(x))) => Classification::UserMessage(Ok(Ok(x))),
+        Ok(Ok(MockMessage::Close(x))) => Classification::ControlMessage(x),
+        // Inner errors (e.g., JSON errors) are directly reported as
+        // errors.
+        Ok(Err(err)) => Classification::UserMessage(Ok(Err(err))),
+        // We push through outer errors (simulating websocket errors) as
+        // user messages.
+        Err(err) => Classification::UserMessage(Err(err)),
+      }
+    }
+
+    fn is_error(user_message: &Self::UserMessage) -> bool {
+      // We only report inner errors as errors for the sake of testing.
+      user_message
+        .as_ref()
+        .map(|inner| inner.is_err())
+        .unwrap_or(false)
+    }
+  }
+
+
+  /// Make sure that event with nested errors sending and receiving type
+  /// checks and works.
+  #[test(tokio::test)]
+  async fn send_recv_with_errors() {
+    let mut it = iter([
+      Ok(Ok(MockMessage::Value(1u64))),
+      Ok(Ok(MockMessage::Value(2u64))),
+      Ok(Ok(MockMessage::Value(3u64))),
+      Ok(Ok(MockMessage::Close(200))),
+      Ok(Ok(MockMessage::Close(201))),
+      Ok(Ok(MockMessage::Value(4u64))),
+    ])
+    .map(Ok);
+
+    let (mut send, recv) = channel::<Result<Result<MockMessage<u64>, String>, u64>>(16);
+    let () = send.send_all(&mut it).await.unwrap();
+
+    let (mut message_stream, mut subscription) = subscribe(recv, send);
+    let close = subscription
+      .send(Ok(Ok(MockMessage::Close(42))))
+      .boxed_local();
+    let message =
+      drive::<Result<Result<MockMessage<u64>, String>, u64>, _, _>(close, &mut message_stream)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // We should have received back the first "control" message that we
+    // fed into the stream, which has the payload 200.
+    assert_eq!(message, Some(Ok(200)));
+  }
+
+  /// Check that inner errors are pushed to the subscription properly.
+  #[test(tokio::test)]
+  async fn inner_error() {
+    let mut it = iter([
+      Ok(Ok(MockMessage::Value(1u64))),
+      Ok(Err("error".to_string())),
+      Ok(Ok(MockMessage::Close(200))),
+    ])
+    .map(Ok);
+
+    let (mut send, recv) = channel::<Result<Result<MockMessage<u64>, String>, u64>>(16);
+    let () = send.send_all(&mut it).await.unwrap();
+
+    let (mut message_stream, mut subscription) = subscribe(recv, send);
+    let close = subscription
+      .send(Ok(Ok(MockMessage::Close(42))))
+      .boxed_local();
+    let message =
+      drive::<Result<Result<MockMessage<u64>, String>, u64>, _, _>(close, &mut message_stream)
+        .await
+        .unwrap_err()
+        .unwrap();
+
+    assert_eq!(message, Err("error".to_string()));
+  }
+
+  /// Check that outer errors are ignored by the subscription.
+  #[test(tokio::test)]
+  async fn outer_error() {
+    let mut it = iter([
+      Ok(Ok(MockMessage::Value(1u64))),
+      Err(1337),
+      Ok(Ok(MockMessage::Close(200))),
+    ])
+    .map(Ok);
+
+    let (mut send, recv) = channel::<Result<Result<MockMessage<u64>, String>, u64>>(16);
+    let () = send.send_all(&mut it).await.unwrap();
+
+    let (mut message_stream, mut subscription) = subscribe(recv, send);
+    let close = subscription
+      .send(Ok(Ok(MockMessage::Close(42))))
+      .boxed_local();
+    let message =
+      drive::<Result<Result<MockMessage<u64>, String>, u64>, _, _>(close, &mut message_stream)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(message, Some(Ok(200)));
+  }
 }
