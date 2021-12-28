@@ -33,10 +33,10 @@ where
   let future = async move {
     listener
       .accept()
-      .map(move |result| result.unwrap())
+      .map(Result::unwrap)
       .then(|(stream, _addr)| accept_websocket(MaybeTlsStream::Plain(stream)))
-      .map(move |result| result.unwrap())
-      .then(move |ws_stream| f(ws_stream))
+      .map(Result::unwrap)
+      .then(f)
       .await
   };
 
