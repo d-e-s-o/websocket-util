@@ -5,6 +5,7 @@
 //! websocket connection with an embedded control channel through an
 //! external subscription object.
 
+use std::convert::Infallible;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::pin::Pin;
@@ -203,16 +204,16 @@ where
   S: Sink<I> + Unpin,
   M: Message,
 {
-  /// Send a message over the internal control channel and wait a
-  /// control message response.
-  ///
-  /// The method returns the following errors:
-  /// - `Err(..)` when the sink failed to send an item
-  /// - `Ok(None)` when the message stream got closed
-  /// - `Ok(Some(Err(())))` when message classification reported an
-  ///    error; the actual error still manifests through the message
-  ///    stream
-  pub async fn send(&mut self, item: I) -> Result<Option<Result<M::ControlMessage, ()>>, S::Error> {
+  /// Install a one-shot channel, run a function being passed our sink,
+  /// and then wait for a message being received through the channel.
+  async fn with_channel<'slf, F, G, E>(
+    &'slf mut self,
+    f: F,
+  ) -> Result<Option<Result<M::ControlMessage, ()>>, E>
+  where
+    F: FnOnce(&'slf mut S) -> G,
+    G: Future<Output = Result<(), E>>,
+  {
     // Create a one-shot channel and register it with the message stream
     // via our shared state.
     let (sender, receiver) = channel();
@@ -224,7 +225,7 @@ where
       .replace(sender);
     debug_assert!(_prev.is_none());
 
-    if let Err(err) = self.sink.send(item).await {
+    if let Err(err) = f(&mut self.sink).await {
       // We are about to exit early, because we failed to send our
       // message over the control channel. Make sure to clean up the
       // shared state that we installed earlier, so that the invariant
@@ -253,6 +254,30 @@ where
     // got dropped. That should never happen (because we control it),
     // but we map that to a `None`, just in case.
     Ok(Result::<_, Canceled>::unwrap_or(result, None))
+  }
+
+  /// Send a message over the internal control channel and wait a
+  /// control message response.
+  ///
+  /// The method returns the following errors:
+  /// - `Err(..)` when the sink failed to send an item
+  /// - `Ok(None)` when the message stream got closed
+  /// - `Ok(Some(Err(())))` when message classification reported an
+  ///    error; the actual error still manifests through the message
+  ///    stream
+  pub async fn send(&mut self, item: I) -> Result<Option<Result<M::ControlMessage, ()>>, S::Error> {
+    self
+      .with_channel(|sink| async move { sink.send(item).await })
+      .await
+  }
+
+  /// Wait for a control message to arrive.
+  pub async fn read(&mut self) -> Option<Result<M::ControlMessage, ()>> {
+    let result = self.with_channel(|_sink| async { Ok(()) }).await;
+
+    // It's fine to unwrap here because we statically guarantee that an
+    // error can never occur.
+    Result::<_, Infallible>::unwrap(result)
   }
 }
 
@@ -380,6 +405,32 @@ mod tests {
 
     // We should have received back the first "control" message that we
     // fed into the stream, which has the payload 200.
+    assert_eq!(message, Some(Ok(200)));
+  }
+
+  /// Check that we can wait for a control message without sending
+  /// anything beforehand.
+  #[test(tokio::test)]
+  async fn read() {
+    let mut it = iter([
+      MockMessage::Value(1u64),
+      MockMessage::Value(2u64),
+      MockMessage::Value(3u64),
+      MockMessage::Close(200),
+      MockMessage::Close(201),
+      MockMessage::Value(4u64),
+    ])
+    .map(Ok);
+
+    let (mut send, recv) = channel::<MockMessage<u64>>(16);
+    let () = send.send_all(&mut it).await.unwrap();
+
+    let (mut message_stream, mut subscription) = subscribe(recv, send);
+    let close = subscription.read().boxed_local();
+    let message = drive::<MockMessage<u64>, _, _>(close, &mut message_stream)
+      .await
+      .unwrap();
+
     assert_eq!(message, Some(Ok(200)));
   }
 
