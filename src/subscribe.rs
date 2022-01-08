@@ -53,8 +53,8 @@ pub trait Message {
   fn classify(self) -> Classification<Self::UserMessage, Self::ControlMessage>;
 
   /// Check whether a user message is considered an error. Erroneous
-  /// messages cause any ongoing [`Subscription::send`] requests to
-  /// result in an error.
+  /// messages cause any ongoing [`Subscription::send`] or
+  /// [`Subscription::read`] requests to result in an error.
   fn is_error(user_message: &Self::UserMessage) -> bool;
 }
 
@@ -66,7 +66,7 @@ pub trait Message {
 type SharedState<M> = Arc<Mutex<Option<Sender<Option<Result<M, ()>>>>>>;
 
 
-/// A stream of messages that is associated with a `Subscription`.
+/// A stream of messages that is associated with a [`Subscription`].
 #[derive(Debug)]
 pub struct MessageStream<S, M>
 where
@@ -180,11 +180,11 @@ where
 /// sending and receiving control messages over it.
 ///
 /// # Notes
-/// - in order for any [`send`][Subscription::send] operation to
-///   resolve, the associated [`MessageStream`] stream needs to be
-///   polled; that is necessary because this operation expects a control
-///   message response and that control message comes through the
-///   regular stream.
+/// - in order for any [`send`][Subscription::send] or
+///   [`read`][Subscription::read] operations to resolve, the associated
+///   [`MessageStream`] stream needs to be polled; that is necessary
+///   because this operation expects a control message response and that
+///   control message comes through the regular stream.
 #[derive(Debug)]
 pub struct Subscription<S, M, I>
 where
