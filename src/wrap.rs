@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::fmt::Debug;
+use std::fmt::Formatter;
+use std::fmt::Result as FmtResult;
 use std::io;
 use std::marker::PhantomData;
 use std::pin::Pin;
+use std::str::from_utf8 as str_from_utf8;
 use std::task::Poll as StdPoll;
 use std::time::Duration;
 
@@ -20,6 +23,8 @@ use tokio_tungstenite::tungstenite::Message as WebSocketMessage;
 
 use tracing::debug;
 use tracing::error;
+use tracing::field::debug;
+use tracing::field::DebugValue;
 use tracing::trace;
 
 
@@ -155,12 +160,6 @@ where
   message_state.set(message);
 }
 
-use std::fmt::Formatter;
-use std::fmt::Result as FmtResult;
-use std::str::from_utf8 as str_from_utf8;
-
-use tracing::field::debug;
-use tracing::field::DebugValue;
 
 /// A type for displaying a time range in a human readable way.
 struct DebugMessage<'m> {
