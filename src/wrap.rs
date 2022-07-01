@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021 Daniel Mueller <deso@posteo.net>
+// Copyright (C) 2019-2022 Daniel Mueller <deso@posteo.net>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::fmt::Debug;
@@ -423,6 +423,10 @@ where
               // only value-add they provide is the optional close
               // frame, but we don't intend to use it or expose it to
               // clients.
+            },
+            WebSocketMessage::Frame(_) => {
+              // We should never receive such a value while reading
+              // messages.
             },
           }
         },

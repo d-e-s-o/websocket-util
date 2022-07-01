@@ -1,3 +1,8 @@
+Unreleased
+----------
+- Bumped `tokio-tungstenite` dependency to `0.17`
+
+
 0.10.1
 ------
 - Introduced `subscribe` module providing building blocks for a
