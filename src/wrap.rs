@@ -14,7 +14,9 @@ use std::time::Duration;
 use futures::task::Context;
 use futures::task::Poll;
 use futures::Sink;
+use futures::SinkExt as _;
 use futures::Stream;
+use futures::StreamExt as _;
 
 use tokio::time::interval;
 use tokio::time::Interval;
@@ -80,17 +82,15 @@ enum SendMessageState<M> {
 
 impl<M> SendMessageState<M> {
   /// Attempt to advance the message state by one step.
-  fn advance<S>(&mut self, sink: Pin<&mut S>, ctx: &mut Context<'_>) -> Result<(), S::Error>
+  fn advance<S>(&mut self, sink: &mut S, ctx: &mut Context<'_>) -> Result<(), S::Error>
   where
     S: Sink<M> + Unpin,
     M: Debug,
   {
-    let mut sink = Pin::get_mut(sink);
-
     match self {
       Self::Unused => Ok(()),
       Self::Pending(message) => {
-        match Pin::new(&mut sink).poll_ready(ctx) {
+        match sink.poll_ready_unpin(ctx) {
           Poll::Pending => return Ok(()),
           Poll::Ready(Ok(())) => (),
           Poll::Ready(Err(err)) => {
@@ -107,7 +107,7 @@ impl<M> SendMessageState<M> {
         );
 
         if let Some(message) = message {
-          Pin::new(&mut sink).start_send(message)?;
+          sink.start_send_unpin(message)?;
           *self = Self::Flush;
         }
         Ok(())
@@ -115,7 +115,7 @@ impl<M> SendMessageState<M> {
       Self::Flush => {
         trace!(channel = debug(sink as *const _), msg = "flushing");
         *self = Self::Unused;
-        if let Poll::Ready(Err(err)) = Pin::new(&mut sink).poll_flush(ctx) {
+        if let Poll::Ready(Err(err)) = sink.poll_flush_unpin(ctx) {
           Err(err)
         } else {
           Ok(())
@@ -216,12 +216,11 @@ impl Pinger {
   }
 
   /// Attempt to advance the ping state by one step.
-  fn advance<S>(&mut self, sink: Pin<&mut S>, ctx: &mut Context<'_>) -> Result<(), S::Error>
+  fn advance<S>(&mut self, sink: &mut S, ctx: &mut Context<'_>) -> Result<(), S::Error>
   where
     S: Sink<WebSocketMessage, Error = WebSocketError> + Unpin,
   {
-    let sink = Pin::get_mut(sink);
-    self.ping.advance(Pin::new(sink), ctx)?;
+    self.ping.advance(sink, ctx)?;
 
     match self.next_ping.poll_tick(ctx) {
       StdPoll::Ready(_) => {
@@ -249,7 +248,7 @@ impl Pinger {
             let message = WebSocketMessage::Ping(Vec::new());
             set_message(sink, &mut self.ping, message);
 
-            self.ping.advance(Pin::new(sink), ctx)?;
+            self.ping.advance(sink, ctx)?;
             Ping::Pending
           },
           Ping::Pending => {
@@ -369,19 +368,19 @@ where
 
     // Start off by trying to advance any sending of pings and pongs.
     if let Some(pong) = &mut this.pong {
-      if let Err(err) = pong.advance(Pin::new(&mut this.inner), ctx) {
+      if let Err(err) = pong.advance(&mut this.inner, ctx) {
         return Poll::Ready(Some(Err(err)))
       }
     }
 
     if let Some(ping) = &mut this.ping {
-      if let Err(err) = ping.advance(Pin::new(&mut this.inner), ctx) {
+      if let Err(err) = ping.advance(&mut this.inner, ctx) {
         return Poll::Ready(Some(Err(err)))
       }
     }
 
     loop {
-      match Pin::new(&mut this.inner).poll_next(ctx) {
+      match this.inner.poll_next_unpin(ctx) {
         Poll::Pending => {
           // No new data is available yet. There is nothing to do for us
           // except bubble up this result.
@@ -408,7 +407,7 @@ where
                 let message = WebSocketMessage::Pong(data);
                 set_message(&this.inner, pong, message);
 
-                if let Err(err) = pong.advance(Pin::new(&mut this.inner), ctx) {
+                if let Err(err) = pong.advance(&mut this.inner, ctx) {
                   return Poll::Ready(Some(Err(err)))
                 }
               }
@@ -439,7 +438,7 @@ where
   type Error = WebSocketError;
 
   fn poll_ready(mut self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-    Pin::new(&mut self.inner).poll_ready(ctx)
+    self.inner.poll_ready_unpin(ctx)
   }
 
   fn start_send(mut self: Pin<&mut Self>, message: Message) -> Result<(), Self::Error> {
@@ -448,16 +447,16 @@ where
       channel = debug(&self.inner as *const _),
       send_msg = debug_message(&message)
     );
-    Pin::new(&mut self.inner).start_send(message)
+    self.inner.start_send_unpin(message)
   }
 
   fn poll_flush(mut self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
     trace!(channel = debug(&self.inner as *const _), msg = "flushing");
-    Pin::new(&mut self.inner).poll_flush(ctx)
+    self.inner.poll_flush_unpin(ctx)
   }
 
   fn poll_close(mut self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-    Pin::new(&mut self.inner).poll_close(ctx)
+    self.inner.poll_close_unpin(ctx)
   }
 }
 
@@ -469,8 +468,6 @@ mod tests {
   use std::future::Future;
 
   use futures::future::ready;
-  use futures::SinkExt as _;
-  use futures::StreamExt as _;
   use futures::TryStreamExt as _;
 
   use rand::seq::IteratorRandom as _;

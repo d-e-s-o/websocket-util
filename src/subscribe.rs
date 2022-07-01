@@ -116,9 +116,7 @@ where
     let this = self.get_mut();
 
     loop {
-      let stream = Pin::new(&mut this.stream);
-
-      match stream.poll_next(ctx) {
+      match this.stream.poll_next_unpin(ctx) {
         Poll::Pending => {
           // No new data is available yet. There is nothing to do for us
           // except bubble up this result.
