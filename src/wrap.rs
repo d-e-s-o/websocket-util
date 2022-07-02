@@ -523,7 +523,7 @@ mod tests {
     R: Future<Output = Result<(), WebSocketError>> + Send + Sync + 'static,
   {
     let addr = mock_server(f).await;
-    let url = Url::parse(&format!("ws://{}", addr.to_string())).unwrap();
+    let url = Url::parse(&format!("ws://{}", addr)).unwrap();
 
     let (stream, _) = connect_async(url).await.unwrap();
     builder.build(stream)
