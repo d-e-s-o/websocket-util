@@ -161,7 +161,7 @@ where
 }
 
 
-/// A type for displaying a time range in a human readable way.
+/// A type for displaying debug information for a websocket message.
 struct DebugMessage<'m> {
   message: &'m WebSocketMessage,
 }
