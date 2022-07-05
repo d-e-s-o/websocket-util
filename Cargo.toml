@@ -3,6 +3,7 @@ name = "websocket-util"
 version = "0.10.1"
 authors = ["Daniel Mueller <deso@posteo.net>"]
 edition = "2018"
+rust-version = "1.57"
 license = "GPL-3.0-or-later"
 homepage = "https://github.com/d-e-s-o/websocket-util"
 repository = "https://github.com/d-e-s-o/websocket-util.git"
