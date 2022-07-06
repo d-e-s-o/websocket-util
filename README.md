@@ -1,5 +1,5 @@
-[![pipeline](https://gitlab.com/d-e-s-o/websocket-util/badges/master/pipeline.svg)](https://gitlab.com/d-e-s-o/websocket-util/commits/master)
-[![coverage](https://gitlab.com/d-e-s-o/websocket-util/badges/master/coverage.svg)](https://gitlab.com/d-e-s-o/websocket-util/-/jobs/artifacts/master/file/kcov/kcov-merged/index.html?job=coverage:kcov)
+[![pipeline](https://gitlab.com/d-e-s-o/websocket-util/badges/main/pipeline.svg)](https://gitlab.com/d-e-s-o/websocket-util/commits/main)
+[![coverage](https://gitlab.com/d-e-s-o/websocket-util/badges/main/coverage.svg)](https://gitlab.com/d-e-s-o/websocket-util/-/jobs/artifacts/main/file/kcov/kcov-merged/index.html?job=coverage:kcov)
 [![crates.io](https://img.shields.io/crates/v/websocket-util.svg)](https://crates.io/crates/websocket-util)
 [![Docs](https://docs.rs/websocket-util/badge.svg)](https://docs.rs/websocket-util)
 [![rustc](https://img.shields.io/badge/rustc-1.57+-blue.svg)](https://blog.rust-lang.org/2021/12/02/Rust-1.57.0.html)
