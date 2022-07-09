@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2021 Daniel Mueller <deso@posteo.net>
+// Copyright (C) 2019-2022 Daniel Mueller <deso@posteo.net>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #![warn(
@@ -43,6 +43,7 @@
   where_clauses_object_safety,
   while_true
 )]
+#![allow(clippy::let_unit_value)]
 
 //! A crate for converting data on a WebSocket channel into a stream of
 //! JSON decoded objects.

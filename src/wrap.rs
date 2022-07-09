@@ -216,6 +216,7 @@ impl Pinger {
   }
 
   /// Attempt to advance the ping state by one step.
+  #[allow(clippy::result_large_err)]
   fn advance<S>(&mut self, sink: &mut S, ctx: &mut Context<'_>) -> Result<(), S::Error>
   where
     S: Sink<WebSocketMessage, Error = WebSocketError> + Unpin,

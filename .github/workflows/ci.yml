@@ -48,7 +48,7 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
-          toolchain: 1.57.0
+          toolchain: stable
           components: clippy
           override: true
       - run: cargo clippy --no-deps --all-targets --all-features -- -A unknown_lints -D warnings
