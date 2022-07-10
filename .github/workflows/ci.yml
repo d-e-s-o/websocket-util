@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        rust: [1.57.0, stable]
+        rust: [1.59.0, stable]
     steps:
     - uses: actions/checkout@v3
     - uses: actions-rs/toolchain@v1
