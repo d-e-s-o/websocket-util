@@ -1,9 +1,8 @@
-// Copyright (C) 2019-2022 Daniel Mueller <deso@posteo.net>
+// Copyright (C) 2019-2023 Daniel Mueller <deso@posteo.net>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #![warn(
   bad_style,
-  broken_intra_doc_links,
   dead_code,
   future_incompatible,
   illegal_floating_point_literal_pattern,
@@ -41,7 +40,8 @@
   unused_qualifications,
   unused_results,
   where_clauses_object_safety,
-  while_true
+  while_true,
+  rustdoc::broken_intra_doc_links
 )]
 #![allow(clippy::let_unit_value)]
 
