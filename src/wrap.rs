@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2022 Daniel Mueller <deso@posteo.net>
+// Copyright (C) 2019-2023 Daniel Mueller <deso@posteo.net>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::fmt::Debug;
@@ -46,7 +46,7 @@ enum Ping {
 }
 
 
-/// A message received over a `WebSocketStream`.
+/// A message received over a [`Wrapper`].
 #[derive(Debug, PartialEq)]
 pub enum Message {
   /// A text WebSocket message.
@@ -161,7 +161,7 @@ where
 }
 
 
-/// A type for displaying debug information for a websocket message.
+/// A type for displaying debug information for a WebSocket message.
 struct DebugMessage<'m> {
   message: &'m WebSocketMessage,
 }
@@ -183,7 +183,7 @@ impl<'m> Debug for DebugMessage<'m> {
   }
 }
 
-/// Emit a debug representation of a websocket message that takes care
+/// Emit a debug representation of a WebSocket message that takes care
 /// of converting binary messages to string.
 fn debug_message(message: &WebSocketMessage) -> DebugValue<DebugMessage<'_>> {
   debug(DebugMessage { message })
@@ -277,7 +277,7 @@ impl Pinger {
   }
 
   /// Register the fact that activity occurred over the associated
-  /// websocket channel, meaning that there is no need to ping the
+  /// WebSocket channel, meaning that there is no need to ping the
   /// server this interval.
   fn activity(&mut self) {
     self.ping_state = Ping::NotNeeded;
@@ -285,7 +285,7 @@ impl Pinger {
 }
 
 
-/// A type helping with the construction of `Wrapper` objects.
+/// A type helping with the construction of [`Wrapper`] objects.
 #[derive(Debug)]
 pub struct Builder<S> {
   /// The interval at which to send pings. A value of `None` disables
@@ -293,7 +293,7 @@ pub struct Builder<S> {
   ping_interval: Option<Duration>,
   /// Whether or not we send pong replies to ping messages.
   send_pongs: bool,
-  /// Phantom data for the websocket type.
+  /// Phantom data for the WebSocket type.
   _phantom: PhantomData<S>,
 }
 
@@ -310,7 +310,7 @@ impl<S> Builder<S> {
     self
   }
 
-  /// Build the final `Wrapper` wrapping the provided websocket channel.
+  /// Build the final [`Wrapper`] wrapping the provided WebSocket channel.
   pub fn build(self, channel: S) -> Wrapper<S> {
     Wrapper {
       inner: channel,
@@ -335,9 +335,9 @@ impl<S> Default for Builder<S> {
 }
 
 
-/// A wrapped websocket channel that handles responding to pings, sends
-/// pings to check for liveness of server, and filters out websocket
-/// control messages in the process.
+/// A wrapped WebSocket stream that handles responding to pings with
+/// pongs, sending of pings to check for liveness of server, and
+/// filtering out of WebSocket control messages in the process.
 #[derive(Debug)]
 #[must_use = "streams do nothing unless polled"]
 pub struct Wrapper<S> {
@@ -350,7 +350,7 @@ pub struct Wrapper<S> {
 }
 
 impl<S> Wrapper<S> {
-  /// Create a `Builder` for creating a customized `Wrapper`.
+  /// Create a [`Builder`] for creating a customized `Wrapper`.
   pub fn builder() -> Builder<S> {
     Builder::default()
   }
@@ -493,7 +493,7 @@ mod tests {
   use crate::test::WebSocketStream;
 
 
-  /// Check that we can show proper debug representation of websocket
+  /// Check that we can show proper debug representation of WebSocket
   /// messages.
   #[test]
   fn debug_websocket_message() {
@@ -512,7 +512,7 @@ mod tests {
   }
 
 
-  /// Instantiate a websocket server serving data provided by the
+  /// Instantiate a WebSocket server serving data provided by the
   /// given function, connect to said server, and return the resulting
   /// wrapped stream.
   async fn serve_and_connect_with_builder<F, R>(
@@ -530,7 +530,7 @@ mod tests {
     builder.build(stream)
   }
 
-  /// Create a websocket server and connect to it, similar to
+  /// Create a WebSocket server and connect to it, similar to
   /// `serve_and_connect_with_builder`, but use a pre-defined builder
   /// with a 10ms ping interval.
   async fn serve_and_connect<F, R>(f: F) -> Wrapper<WebSocketStream>

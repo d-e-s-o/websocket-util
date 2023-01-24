@@ -45,13 +45,13 @@
 )]
 #![allow(clippy::let_unit_value)]
 
-//! A crate for converting data on a WebSocket channel into a stream of
-//! JSON decoded objects.
+//! A crate for providing utility functionality on top of a WebSocket
+//! channel.
 
 /// Logic for associating a subscription-style controller object with a
-/// websocket channel.
+/// WebSocket stream.
 pub mod subscribe;
-/// Functionality for wrapping a websocket stream, adding automated
+/// Functionality for wrapping a WebSocket stream, adding automated
 /// support for handling of control messages.
 pub mod wrap;
 

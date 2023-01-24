@@ -1,8 +1,8 @@
-// Copyright (C) 2021 Daniel Mueller (deso@posteo.net)
+// Copyright (C) 2021-2023 Daniel Mueller (deso@posteo.net)
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! A module providing low-level building blocks for controlling a
-//! websocket connection with an embedded control channel through an
+//! WebSocket stream with an embedded control channel through an
 //! external subscription object.
 
 use std::convert::Infallible;
@@ -31,11 +31,11 @@ use futures::StreamExt as _;
 #[derive(Debug)]
 pub enum Classification<U, C> {
   /// A user message. When classified as such, the message is directly
-  /// emitted by the `MessageStream` and the associated `Subscription`
-  /// is not informed.
+  /// emitted by the [`MessageStream`] and the associated
+  /// [`Subscription`] is not informed.
   UserMessage(U),
   /// A control message. Such a message is forwarded to the
-  /// `Subscription`. It is never emitted by the `MessageStream`.
+  /// [`Subscription`]. It is never emitted by the [`MessageStream`].
   ControlMessage(C),
 }
 
@@ -136,7 +136,7 @@ where
                 // the subscription about that fact (to unblock
                 // requests) but yield the actual error via the message
                 // stream (note that we cannot assume that errors are
-                // clonable and that's why we only indicate *that* an
+                // cloneable and that's why we only indicate *that* an
                 // error occurred to the subscription).
                 Self::inform_subscription(&shared, Some(Err(())));
               }
@@ -499,7 +499,7 @@ mod tests {
         // Inner errors (e.g., JSON errors) are directly reported as
         // errors.
         Ok(Err(err)) => Classification::UserMessage(Ok(Err(err))),
-        // We push through outer errors (simulating websocket errors) as
+        // We push through outer errors (simulating WebSocket errors) as
         // user messages.
         Err(err) => Classification::UserMessage(Err(err)),
       }
