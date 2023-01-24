@@ -58,3 +58,15 @@ jobs:
           components: clippy
           override: true
       - run: cargo clippy --no-deps --all-targets --all-features -- -A unknown_lints -D warnings
+  cargo-doc:
+    name: Generate documentation
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: '-A unknown_lints -D warnings'
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - run: cargo doc --no-deps
