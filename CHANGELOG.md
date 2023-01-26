@@ -1,5 +1,5 @@
-Unreleased
-----------
+0.11.0
+------
 - Switched to using GitHub Actions as CI provider
 - Bumped minimum supported Rust version to `1.59`
 - Bumped `tokio-tungstenite` dependency to `0.18`
