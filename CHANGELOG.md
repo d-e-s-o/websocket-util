@@ -1,5 +1,7 @@
 Unreleased
 ----------
+- Added `rustls` feature to use `rustls` as the encryption provider
+  (instead of whatever is native to the system)
 - Bumped minimum supported Rust version to `1.63`
 - Bumped `tokio-tungstenite` dependency to `0.19`
 
