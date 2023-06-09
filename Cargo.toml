@@ -15,6 +15,8 @@ data.
 include = ["src/**/*", "LICENSE", "README.md", "CHANGELOG.md"]
 
 [features]
+# Enable to use rusttls for cryptography over system's native variant.
+rustls = ["tokio-tungstenite/__rustls-tls"]
 test = ["tokio-tungstenite/connect"]
 
 [dependencies]

@@ -1,3 +1,8 @@
+Unreleased
+----------
+- Added `rustls` feature to use `rustls` as the encryption provider
+  (instead of whatever is native to the system)
+
 0.13.0
 ------
 - Bumped `tokio-tungstenite` dependency to `0.23`
