@@ -1,4 +1,4 @@
-[![pipeline](https://github.com/d-e-s-o/websocket-util/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/d-e-s-o/websocket-util/actions/workflows/ci.yml)
+[![pipeline](https://github.com/d-e-s-o/websocket-util/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/d-e-s-o/websocket-util/actions/workflows/test.yml)
 [![coverage](https://codecov.io/gh/d-e-s-o/websocket-util/branch/main/graph/badge.svg)](https://codecov.io/gh/d-e-s-o/websocket-util)
 [![crates.io](https://img.shields.io/crates/v/websocket-util.svg)](https://crates.io/crates/websocket-util)
 [![Docs](https://docs.rs/websocket-util/badge.svg)](https://docs.rs/websocket-util)
