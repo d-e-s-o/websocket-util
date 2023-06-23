@@ -1,3 +1,8 @@
+Unreleased
+----------
+- Switched to using Rust 2021 Edition
+
+
 0.11.0
 ------
 - Switched to using GitHub Actions as CI provider
