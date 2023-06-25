@@ -19,13 +19,14 @@ env:
   RUSTFLAGS: '-C debuginfo=0'
 
 jobs:
-  test:
-    name: Build and test with cargo ${{ matrix.rust }}
+  build:
+    name: Build [${{ matrix.rust }}, ${{ matrix.profile }}]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         rust: [stable]
+        profile: [dev, release]
     steps:
     - uses: actions/checkout@v3
     - uses: actions-rs/toolchain@v1
@@ -33,22 +34,8 @@ jobs:
         toolchain: ${{ matrix.rust }}
         profile: minimal
         override: true
-    - name: Build
-      run: cargo build
-    - if: ${{ matrix.rust != 'stable' }}
-      name: Run tests
-      run: cargo test -- --include-ignored
-    - if: ${{ matrix.rust == 'stable' }}
-      name: Install cargo-llvm-cov
-      uses: taiki-e/install-action@cargo-llvm-cov
-    - if: ${{ matrix.rust == 'stable' }}
-      name: Test and gather coverage
-      run: cargo llvm-cov --lcov --output-path lcov.info -- --include-ignored
-    - if: ${{ matrix.rust == 'stable' }}
-      name: Upload code coverage results
-      uses: codecov/codecov-action@v3
-      with:
-        files: lcov.info
+    - name: Build ${{ matrix.profile }}
+      run: cargo build --profile=${{ matrix.profile }} --all-targets --all-features
   build-minimum:
     name: Build using minimum versions of dependencies
     runs-on: ubuntu-latest
@@ -70,6 +57,19 @@ jobs:
           default: true
       - name: Build
         run: cargo build --locked --all-features
+  test:
+    name: Test and coverage
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install cargo-llvm-cov
+      uses: taiki-e/install-action@cargo-llvm-cov
+    - name: Test and gather coverage
+      run: cargo llvm-cov --all-targets --lcov --output-path lcov.info --ignore-filename-regex=/dev/null -- --include-ignored
+    - name: Upload code coverage results
+      uses: codecov/codecov-action@v3
+      with:
+        files: lcov.info
   clippy:
     name: Lint with clippy
     runs-on: ubuntu-latest
@@ -92,4 +92,7 @@ jobs:
         with:
           toolchain: stable
           override: true
-      - run: cargo doc --no-deps
+      - run: |
+          cargo doc --no-deps
+          # Explicitly run doc tests as cargo-llvm-cov currently does not.
+          cargo test --doc
