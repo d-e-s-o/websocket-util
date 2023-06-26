@@ -225,6 +225,10 @@ impl Pinger {
 
     match self.next_ping.poll_tick(ctx) {
       StdPoll::Ready(_) => {
+        // When using the `poll_tick` API, we are on the hook for
+        // resetting the interval to be woken up again when it passed.
+        let () = self.next_ping.reset();
+
         // We are due sending a ping according to the user's specified
         // ping interval. Check the existing ping state to decide what
         // to actually do. We may not need to send a ping if we can
