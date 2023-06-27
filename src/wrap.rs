@@ -268,7 +268,7 @@ impl Pinger {
             self.ping_state = Ping::Needed;
 
             let err = WebSocketError::Io(io::Error::new(
-              io::ErrorKind::Other,
+              io::ErrorKind::TimedOut,
               "server failed to respond to pings",
             ));
             return Err(err)
@@ -706,10 +706,13 @@ mod tests {
 
     let stream = serve_and_connect(test).await;
     let err = stream.try_for_each(|_| ready(Ok(()))).await.unwrap_err();
-    assert_eq!(
-      err.to_string(),
-      "IO error: server failed to respond to pings"
-    );
+    match err {
+      WebSocketError::Io(err) => {
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+        assert_eq!(err.to_string(), "server failed to respond to pings");
+      },
+      _ => panic!("Received unexpected error: {err:?}"),
+    }
   }
 
   /// Check that messages sent by the server are transported correctly.
