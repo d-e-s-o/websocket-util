@@ -475,6 +475,9 @@ mod tests {
   use super::*;
 
   use std::future::Future;
+  use std::sync::atomic::AtomicUsize;
+  use std::sync::atomic::Ordering;
+  use std::sync::Arc;
 
   use futures::future::ready;
   use futures::TryStreamExt as _;
@@ -485,6 +488,7 @@ mod tests {
 
   use test_log::test;
 
+  use tokio::time::pause;
   use tokio::time::sleep;
   use tokio::time::timeout;
 
@@ -668,6 +672,52 @@ mod tests {
       .try_for_each(|_| ready(Ok(())))
       .await
       .unwrap();
+  }
+
+  /// Make sure that we do not get any ping bursts or erroneous ping
+  /// timeouts when polling is delayed.
+  #[test(tokio::test)]
+  async fn no_ping_bursts() {
+    let counter = Arc::new(AtomicUsize::new(0));
+    let clone = counter.clone();
+
+    let test = |stream: WebSocketStream| async move {
+      let mut stream = stream.fuse();
+
+      loop {
+        let msg = stream.next().await.unwrap().unwrap();
+        if let WebSocketMessage::Ping(_) = msg {
+          let _ = clone.fetch_add(1, Ordering::Relaxed);
+
+          // We don't need to respond with a `Pong` here as that's
+          // already done by the underlying infrastructure.
+        } else {
+          panic!("received unexpected message: {msg:?}")
+        }
+      }
+    };
+
+    // Pause time on this thread; this way we have full control over how
+    // much time passes while the test runs.
+    let () = pause();
+
+    let wrapper = serve_and_connect(test).await;
+    // Sleep for 10s (in virtual time). That would have caused roughly
+    // 10s / 10ms = 1000 ping intervals to have been missed back when
+    // wake ups were accumulated.
+    let () = sleep(Duration::from_secs(10)).await;
+
+    let future = wrapper.for_each(|result| {
+      assert!(result.is_ok(), "{result:?}");
+      ready(())
+    });
+
+    // Drain the stream for 15ms, which is enough to trigger a single
+    // ping.
+    assert!(timeout(Duration::from_millis(15), future).await.is_err());
+
+    // We expect to have seen one ping.
+    assert_eq!(counter.load(Ordering::Relaxed), 1);
   }
 
   /// Verify that no pings are being sent by our `Wrapper` when the

@@ -2,6 +2,8 @@ Unreleased
 ----------
 - Fixed ping sending after change in `tokio` `Interval` API with version
   `1.27.0`
+  - Fixed potential ping bursts and timeouts when polling is delayed
+    excessively
 - Adjusted ping timeout error kind from `std::io::ErrorKind::Other` to
   `std::io::ErrorKind::TimedOut`
 - Switched to using Rust 2021 Edition
