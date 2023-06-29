@@ -7,6 +7,7 @@ Unreleased
 - Adjusted ping timeout error kind from `std::io::ErrorKind::Other` to
   `std::io::ErrorKind::TimedOut`
 - Switched to using Rust 2021 Edition
+- Added GitHub Actions workflow for publishing the crate
 
 
 0.11.0
