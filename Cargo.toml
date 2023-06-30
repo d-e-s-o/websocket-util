@@ -1,6 +1,6 @@
 [package]
 name = "websocket-util"
-version = "0.11.0"
+version = "0.11.1"
 authors = ["Daniel Mueller <deso@posteo.net>"]
 edition = "2021"
 rust-version = "1.59"
@@ -19,7 +19,7 @@ test = []
 
 [dependencies]
 futures = {version = "0.3", default-features = false, features = ["async-await", "std"]}
-tokio = {version = "1.0", default-features = false, features = ["rt", "time"]}
+tokio = {version = "1.27", default-features = false, features = ["rt", "time"]}
 tracing = {version = "0.1", default-features = false, features = ["std"]}
 tokio-tungstenite = {version = "0.18", default-features = false, features = ["connect"]}
 

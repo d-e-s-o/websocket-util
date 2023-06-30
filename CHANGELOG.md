@@ -1,5 +1,5 @@
-Unreleased
-----------
+0.11.1
+------
 - Fixed ping sending after change in `tokio` `Interval` API with version
   `1.27.0`
   - Fixed potential ping bursts and timeouts when polling is delayed
@@ -8,6 +8,7 @@ Unreleased
   `std::io::ErrorKind::TimedOut`
 - Switched to using Rust 2021 Edition
 - Added GitHub Actions workflow for publishing the crate
+- Bumped `tokio` dependency to `1.27`
 
 
 0.11.0
