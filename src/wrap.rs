@@ -745,23 +745,24 @@ mod tests {
   /// pings.
   #[test(tokio::test)]
   async fn no_pong_response() {
-    async fn test(mut stream: WebSocketStream) -> Result<(), WebSocketError> {
-      stream
-        .send(WebSocketMessage::Text("test".to_string()))
-        .await?;
-
+    async fn test(_stream: WebSocketStream) -> Result<(), WebSocketError> {
       sleep(Duration::from_secs(10)).await;
       Ok(())
     }
 
-    let stream = serve_and_connect(test).await;
-    let err = stream.try_for_each(|_| ready(Ok(()))).await.unwrap_err();
-    match err {
-      WebSocketError::Io(err) => {
-        assert_eq!(err.kind(), io::ErrorKind::TimedOut);
-        assert_eq!(err.to_string(), "server failed to respond to pings");
-      },
-      _ => panic!("Received unexpected error: {err:?}"),
+    let mut stream = serve_and_connect(test).await;
+
+    // We should see a timeout error. We test repeatedly to make sure
+    // that we continue pinging if errors are ignored by clients.
+    for _ in 0..5 {
+      let err = stream.next().await.unwrap().unwrap_err();
+      match err {
+        WebSocketError::Io(err) => {
+          assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+          assert_eq!(err.to_string(), "server failed to respond to pings");
+        },
+        _ => panic!("Received unexpected error: {err:?}"),
+      }
     }
   }
 
