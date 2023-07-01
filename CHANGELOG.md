@@ -1,3 +1,9 @@
+Unreleased
+----------
+- Fixed wake ups of potentially wrong task when polling `Wrapper`
+  objects from different contexts
+
+
 0.11.1
 ------
 - Fixed ping sending after change in `tokio` `Interval` API with version
