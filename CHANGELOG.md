@@ -2,6 +2,7 @@ Unreleased
 ----------
 - Fixed wake ups of potentially wrong task when polling `Wrapper`
   objects from different contexts
+- Lowered `tokio` dependency back to `1.8`
 
 
 0.11.1
