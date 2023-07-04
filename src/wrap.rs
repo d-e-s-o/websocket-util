@@ -252,7 +252,6 @@ impl Pinger {
               Ping::Needed
             },
             Ping::Needed => {
-              trace!(channel = debug(sink as *const _), msg = "sending ping");
               // The ping state is still `Needed`, which is what we set it
               // to at the last interval. We need to make sure to actually
               // send a ping over the wire now to check whether our
