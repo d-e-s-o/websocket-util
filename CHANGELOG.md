@@ -1,8 +1,13 @@
+Unreleased
+----------
+- Bumped minimum supported Rust version to `1.63`
+
+
 0.11.2
 ------
 - Fixed wake ups of potentially wrong task when polling `Wrapper`
   objects from different contexts
-- Lowered `tokio` dependency back to `1.8`
+- Lowered `tokio` dependency to `1.8`
 
 
 0.11.1
