@@ -1,6 +1,7 @@
 Unreleased
 ----------
 - Bumped minimum supported Rust version to `1.63`
+- Bumped `tokio-tungstenite` dependency to `0.19`
 
 
 0.11.2

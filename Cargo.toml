@@ -21,7 +21,7 @@ test = []
 futures = {version = "0.3", default-features = false, features = ["async-await", "std"]}
 tokio = {version = "1.8", default-features = false, features = ["rt", "time"]}
 tracing = {version = "0.1", default-features = false, features = ["std"]}
-tokio-tungstenite = {version = "0.18", default-features = false, features = ["connect"]}
+tokio-tungstenite = {version = "0.19", default-features = false, features = ["connect"]}
 
 [dev-dependencies]
 rand = {version = "0.8", default-features = false, features = ["std", "std_rng"]}
