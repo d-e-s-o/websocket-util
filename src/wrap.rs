@@ -20,6 +20,7 @@ use futures::StreamExt as _;
 
 use tokio::time::interval;
 use tokio::time::Interval;
+use tokio::time::MissedTickBehavior;
 use tokio_tungstenite::tungstenite::Error as WebSocketError;
 use tokio_tungstenite::tungstenite::Message as WebSocketMessage;
 
@@ -208,9 +209,15 @@ impl Pinger {
   /// Create a new `Pinger` object for sending pings spaced by
   /// `ping_interval`.
   fn new(ping_interval: Duration) -> Self {
+    let mut next_ping = interval(ping_interval);
+    // If we were not polled in time to send pings we want to just delay
+    // sending instead of sending a burst of them, as would be the
+    // default.
+    let () = next_ping.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
     Self {
       ping: SendMessageState::Unused,
-      next_ping: interval(ping_interval),
+      next_ping,
       ping_state: Ping::NotNeeded,
     }
   }
@@ -221,58 +228,62 @@ impl Pinger {
   where
     S: Sink<WebSocketMessage, Error = WebSocketError> + Unpin,
   {
-    self.ping.advance(sink, ctx)?;
+    let () = self.ping.advance(sink, ctx)?;
+    let mut result = Ok(());
 
-    match self.next_ping.poll_tick(ctx) {
-      StdPoll::Ready(_) => {
-        // We are due sending a ping according to the user's specified
-        // ping interval. Check the existing ping state to decide what
-        // to actually do. We may not need to send a ping if we can
-        // infer that we had activity in said interval already.
-        self.ping_state = match self.ping_state {
-          Ping::NotNeeded => {
-            trace!(
-              channel = debug(sink as *const _),
-              msg = "skipping ping due to activity"
-            );
-            // If anything caused our ping state to change to
-            // `NotNeeded` (from the last time we set it to `Needed`)
-            // then just change it back to `Needed`.
-            Ping::Needed
-          },
-          Ping::Needed => {
-            trace!(channel = debug(sink as *const _), msg = "sending ping");
-            // The ping state is still `Needed`, which is what we set it
-            // to at the last interval. We need to make sure to actually
-            // send a ping over the wire now to check whether our
-            // connection is still alive.
-            let message = WebSocketMessage::Ping(Vec::new());
-            set_message(sink, &mut self.ping, message);
+    // We always loop until `next_ping` indicates `Pending`, to be sure
+    // the next wake up is scheduled properly.
+    loop {
+      match self.next_ping.poll_tick(ctx) {
+        StdPoll::Ready(_instant) => {
+          // We are due sending a ping according to the user's specified
+          // ping interval. Check the existing ping state to decide what
+          // to actually do. We may not need to send a ping if we can
+          // infer that we had activity in said interval already.
+          self.ping_state = match self.ping_state {
+            Ping::NotNeeded => {
+              trace!(
+                channel = debug(sink as *const _),
+                msg = "skipping ping due to activity"
+              );
+              // If anything caused our ping state to change to
+              // `NotNeeded` (from the last time we set it to `Needed`)
+              // then just change it back to `Needed`.
+              Ping::Needed
+            },
+            Ping::Needed => {
+              // The ping state is still `Needed`, which is what we set it
+              // to at the last interval. We need to make sure to actually
+              // send a ping over the wire now to check whether our
+              // connection is still alive.
+              let message = WebSocketMessage::Ping(Vec::new());
+              let () = set_message(sink, &mut self.ping, message);
 
-            self.ping.advance(sink, ctx)?;
-            Ping::Pending
-          },
-          Ping::Pending => {
-            error!(
-              channel = debug(sink as *const _),
-              msg = "server failed to respond to pings"
-            );
-            // We leave it up to clients to decide how to handle missed
-            // pings. But in order to not end up in an endless error
-            // cycle in case the client does not care, clear our ping
-            // state.
-            self.ping_state = Ping::Needed;
+              self.ping.advance(sink, ctx)?;
+              Ping::Pending
+            },
+            Ping::Pending => {
+              error!(
+                channel = debug(sink as *const _),
+                msg = "server failed to respond to pings"
+              );
 
-            let err = WebSocketError::Io(io::Error::new(
-              io::ErrorKind::Other,
-              "server failed to respond to pings",
-            ));
-            return Err(err)
-          },
-        };
-        Ok(())
-      },
-      StdPoll::Pending => Ok(()),
+              let err = WebSocketError::Io(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "server failed to respond to pings",
+              ));
+              result = Err(err);
+
+              // We leave it up to clients to decide how to handle missed
+              // pings. But in order to not end up in an endless error
+              // cycle in case the client does not care, clear our ping
+              // state.
+              Ping::Needed
+            },
+          };
+        },
+        StdPoll::Pending => break result,
+      }
     }
   }
 
@@ -471,6 +482,9 @@ mod tests {
   use super::*;
 
   use std::future::Future;
+  use std::sync::atomic::AtomicUsize;
+  use std::sync::atomic::Ordering;
+  use std::sync::Arc;
 
   use futures::future::ready;
   use futures::TryStreamExt as _;
@@ -481,6 +495,7 @@ mod tests {
 
   use test_log::test;
 
+  use tokio::time::pause;
   use tokio::time::sleep;
   use tokio::time::timeout;
 
@@ -666,6 +681,52 @@ mod tests {
       .unwrap();
   }
 
+  /// Make sure that we do not get any ping bursts or erroneous ping
+  /// timeouts when polling is delayed.
+  #[test(tokio::test)]
+  async fn no_ping_bursts() {
+    let counter = Arc::new(AtomicUsize::new(0));
+    let clone = counter.clone();
+
+    let test = |stream: WebSocketStream| async move {
+      let mut stream = stream.fuse();
+
+      loop {
+        let msg = stream.next().await.unwrap().unwrap();
+        if let WebSocketMessage::Ping(_) = msg {
+          let _ = clone.fetch_add(1, Ordering::Relaxed);
+
+          // We don't need to respond with a `Pong` here as that's
+          // already done by the underlying infrastructure.
+        } else {
+          panic!("received unexpected message: {msg:?}")
+        }
+      }
+    };
+
+    // Pause time on this thread; this way we have full control over how
+    // much time passes while the test runs.
+    let () = pause();
+
+    let wrapper = serve_and_connect(test).await;
+    // Sleep for 10s (in virtual time). That would have caused roughly
+    // 10s / 10ms = 1000 ping intervals to have been missed back when
+    // wake ups were accumulated.
+    let () = sleep(Duration::from_secs(10)).await;
+
+    let future = wrapper.for_each(|result| {
+      assert!(result.is_ok(), "{result:?}");
+      ready(())
+    });
+
+    // Drain the stream for 15ms, which is enough to trigger a single
+    // ping.
+    assert!(timeout(Duration::from_millis(15), future).await.is_err());
+
+    // We expect to have seen one ping.
+    assert_eq!(counter.load(Ordering::Relaxed), 1);
+  }
+
   /// Verify that no pings are being sent by our `Wrapper` when the
   /// feature is disabled.
   #[test(tokio::test)]
@@ -691,21 +752,25 @@ mod tests {
   /// pings.
   #[test(tokio::test)]
   async fn no_pong_response() {
-    async fn test(mut stream: WebSocketStream) -> Result<(), WebSocketError> {
-      stream
-        .send(WebSocketMessage::Text("test".to_string()))
-        .await?;
-
+    async fn test(_stream: WebSocketStream) -> Result<(), WebSocketError> {
       sleep(Duration::from_secs(10)).await;
       Ok(())
     }
 
-    let stream = serve_and_connect(test).await;
-    let err = stream.try_for_each(|_| ready(Ok(()))).await.unwrap_err();
-    assert_eq!(
-      err.to_string(),
-      "IO error: server failed to respond to pings"
-    );
+    let mut stream = serve_and_connect(test).await;
+
+    // We should see a timeout error. We test repeatedly to make sure
+    // that we continue pinging if errors are ignored by clients.
+    for _ in 0..5 {
+      let err = stream.next().await.unwrap().unwrap_err();
+      match err {
+        WebSocketError::Io(err) => {
+          assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+          assert_eq!(err.to_string(), "server failed to respond to pings");
+        },
+        _ => panic!("Received unexpected error: {err:?}"),
+      }
+    }
   }
 
   /// Check that messages sent by the server are transported correctly.
