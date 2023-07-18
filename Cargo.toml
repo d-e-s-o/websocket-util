@@ -37,36 +37,3 @@ url = "2.0"
 # versions of transitive dependencies, for cases where our dependencies
 # have incorrect dependency specifications themselves.
 _lazy_static_unused = { package = "lazy_static", version = "1.0.2" }
-[package]
-name = "websocket-util"
-version = "0.11.0"
-authors = ["Daniel Mueller <deso@posteo.net>"]
-edition = "2018"
-rust-version = "1.59"
-license = "GPL-3.0-or-later"
-homepage = "https://github.com/d-e-s-o/websocket-util"
-repository = "https://github.com/d-e-s-o/websocket-util.git"
-readme = "README.md"
-description = """
-A crate providing an easy to consume streaming interface for WebSocket
-data.
-"""
-include = ["src/**/*", "LICENSE", "README.md", "CHANGELOG.md"]
-
-[features]
-test = []
-rustls = ["tokio-tungstenite/__rustls-tls"]
-
-[dependencies]
-futures = {version = "0.3", default-features = false, features = ["async-await", "std"]}
-tokio = {version = "1.0", default-features = false, features = ["rt", "time"]}
-tracing = {version = "0.1", default-features = false, features = ["std"]}
-tokio-tungstenite = {version = "0.19", default-features = false, features = ["connect"]}
-
-[dev-dependencies]
-rand = {version = "0.8", default-features = false, features = ["std", "std_rng"]}
-serde = {version = "1.0", features = ["derive"]}
-test-log = {version = "0.2.8", default-features = false, features = ["trace"]}
-tokio = {version = "1.0", default-features = false, features = ["rt", "macros", "net"]}
-tracing-subscriber = {version = "0.3", default-features = false, features = ["ansi", "env-filter", "fmt", "local-time"]}
-url = "2.0"
