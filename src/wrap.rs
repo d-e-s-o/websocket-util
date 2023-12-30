@@ -573,7 +573,7 @@ mod tests {
       .unwrap_err();
 
     match err {
-      WebSocketError::Protocol(e) if e == ProtocolError::ResetWithoutClosingHandshake => (),
+      WebSocketError::Protocol(ProtocolError::ResetWithoutClosingHandshake) => (),
       e => panic!("received unexpected error: {}", e),
     }
   }
