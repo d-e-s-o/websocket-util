@@ -373,7 +373,7 @@ where
     + Stream<Item = Result<WebSocketMessage, WebSocketError>>
     + Unpin,
 {
-  type Item = Result<Message, WebSocketError>;
+  type Item = Result<Message, S::Error>;
 
   fn poll_next(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
     let this = Pin::get_mut(self);
@@ -451,7 +451,7 @@ impl<S> Sink<Message> for Wrapper<S>
 where
   S: Sink<WebSocketMessage, Error = WebSocketError> + Unpin,
 {
-  type Error = WebSocketError;
+  type Error = S::Error;
 
   fn poll_ready(mut self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
     self.inner.poll_ready_unpin(ctx)
