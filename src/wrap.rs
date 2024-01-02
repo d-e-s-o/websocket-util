@@ -301,8 +301,6 @@ pub struct Builder<S> {
   /// The interval at which to send pings. A value of `None` disables
   /// sending of pings.
   ping_interval: Option<Duration>,
-  /// Whether or not we send pong replies to ping messages.
-  send_pongs: bool,
   /// Phantom data for the WebSocket type.
   _phantom: PhantomData<S>,
 }
@@ -314,21 +312,10 @@ impl<S> Builder<S> {
     self
   }
 
-  /// Overwrite the default of sending no pong responses to pings.
-  pub fn set_send_pongs(mut self, enable: bool) -> Builder<S> {
-    self.send_pongs = enable;
-    self
-  }
-
   /// Build the final [`Wrapper`] wrapping the provided WebSocket channel.
   pub fn build(self, channel: S) -> Wrapper<S> {
     Wrapper {
       inner: channel,
-      pong: if self.send_pongs {
-        Some(SendMessageState::Unused)
-      } else {
-        None
-      },
       ping: self.ping_interval.map(Pinger::new),
     }
   }
@@ -338,7 +325,6 @@ impl<S> Default for Builder<S> {
   fn default() -> Self {
     Self {
       ping_interval: Some(Duration::from_secs(30)),
-      send_pongs: false,
       _phantom: PhantomData,
     }
   }
@@ -353,8 +339,6 @@ impl<S> Default for Builder<S> {
 pub struct Wrapper<S> {
   /// The wrapped stream & sink.
   inner: S,
-  /// The state we maintain for sending pongs over our internal sink.
-  pong: Option<SendMessageState<WebSocketMessage>>,
   /// The state we maintain for sending pings over our internal sink.
   ping: Option<Pinger>,
 }
@@ -376,13 +360,6 @@ where
 
   fn poll_next(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
     let this = Pin::get_mut(self);
-
-    // Start off by trying to advance any sending of pings and pongs.
-    if let Some(pong) = &mut this.pong {
-      if let Err(err) = pong.advance(&mut this.inner, ctx) {
-        return Poll::Ready(Some(Err(err)))
-      }
-    }
 
     if let Some(ping) = &mut this.ping {
       if let Err(err) = ping.advance(&mut this.inner, ctx) {
@@ -412,16 +389,9 @@ where
           match message {
             WebSocketMessage::Text(data) => break Poll::Ready(Some(Ok(Message::Text(data)))),
             WebSocketMessage::Binary(data) => break Poll::Ready(Some(Ok(Message::Binary(data)))),
-            WebSocketMessage::Ping(data) => {
-              if let Some(pong) = &mut this.pong {
-                // Respond with a pong.
-                let message = WebSocketMessage::Pong(data);
-                set_message(&this.inner, pong, message);
-
-                if let Err(err) = pong.advance(&mut this.inner, ctx) {
-                  return Poll::Ready(Some(Err(err)))
-                }
-              }
+            WebSocketMessage::Ping(_) => {
+              // Ping messages are automatically and transparently
+              // responded to by tungstenite.
             },
             WebSocketMessage::Pong(_) => {
               // We don't handle pongs any specifically. We already
@@ -617,37 +587,6 @@ mod tests {
     }
 
     let builder = Wrapper::builder().set_ping_interval(None);
-    serve_and_connect_with_builder(builder, test)
-      .await
-      .try_for_each(|_| ready(Ok(())))
-      .await
-      .unwrap();
-  }
-
-  /// Verify that ping requests are acknowledged by pongs by the
-  /// underlying server and by our `Wrapper` (if the feature is
-  /// enabled).
-  #[test(tokio::test)]
-  async fn ping_pong_2() {
-    async fn test(mut stream: WebSocketStream) -> Result<(), WebSocketError> {
-      // Ping.
-      stream.send(WebSocketMessage::Ping(Vec::new())).await?;
-      // Expect two Pong messages, one from the underlying server and
-      // another from our `Wrapper`.
-      assert_eq!(
-        stream.next().await.unwrap()?,
-        WebSocketMessage::Pong(Vec::new()),
-      );
-      assert_eq!(
-        stream.next().await.unwrap()?,
-        WebSocketMessage::Pong(Vec::new()),
-      );
-
-      stream.send(WebSocketMessage::Close(None)).await?;
-      Ok(())
-    }
-
-    let builder = Wrapper::builder().set_send_pongs(true);
     serve_and_connect_with_builder(builder, test)
       .await
       .try_for_each(|_| ready(Ok(())))
