@@ -8,11 +8,10 @@ use std::io;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::str::from_utf8 as str_from_utf8;
-use std::task::Poll as StdPoll;
+use std::task::Poll;
 use std::time::Duration;
 
 use futures::task::Context;
-use futures::task::Poll;
 use futures::Sink;
 use futures::SinkExt as _;
 use futures::Stream;
@@ -235,7 +234,7 @@ impl Pinger {
     // the next wake up is scheduled properly.
     loop {
       match self.next_ping.poll_tick(ctx) {
-        StdPoll::Ready(_instant) => {
+        Poll::Ready(_instant) => {
           // We are due sending a ping according to the user's specified
           // ping interval. Check the existing ping state to decide what
           // to actually do. We may not need to send a ping if we can
@@ -282,7 +281,7 @@ impl Pinger {
             },
           };
         },
-        StdPoll::Pending => break result,
+        Poll::Pending => break result,
       }
     }
   }
