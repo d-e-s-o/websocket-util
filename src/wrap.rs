@@ -114,11 +114,16 @@ impl<M> SendMessageState<M> {
       },
       Self::Flush => {
         trace!(channel = debug(sink as *const _), msg = "flushing");
-        *self = Self::Unused;
-        if let Poll::Ready(Err(err)) = sink.poll_flush_unpin(ctx) {
-          Err(err)
-        } else {
-          Ok(())
+        match sink.poll_flush_unpin(ctx) {
+          Poll::Pending => Ok(()),
+          Poll::Ready(Ok(())) => {
+            *self = Self::Unused;
+            Ok(())
+          },
+          Poll::Ready(Err(err)) => {
+            *self = Self::Unused;
+            Err(err)
+          },
         }
       },
     }
