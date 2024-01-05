@@ -81,51 +81,51 @@ enum SendMessageState<M> {
 }
 
 impl<M> SendMessageState<M> {
-  /// Attempt to advance the message state by one step.
+  /// Attempt to advance the message state.
   fn advance<S>(&mut self, sink: &mut S, ctx: &mut Context<'_>) -> Result<(), S::Error>
   where
     S: Sink<M> + Unpin,
     M: Debug,
   {
-    match self {
-      Self::Unused => Ok(()),
-      Self::Pending(message) => {
-        match sink.poll_ready_unpin(ctx) {
-          Poll::Pending => return Ok(()),
-          Poll::Ready(Ok(())) => (),
-          Poll::Ready(Err(err)) => {
-            *self = Self::Unused;
-            return Err(err)
-          },
-        }
+    loop {
+      match self {
+        Self::Unused => break Ok(()),
+        Self::Pending(message) => {
+          match sink.poll_ready_unpin(ctx) {
+            Poll::Pending => return Ok(()),
+            Poll::Ready(Ok(())) => (),
+            Poll::Ready(Err(err)) => {
+              *self = Self::Unused;
+              return Err(err)
+            },
+          }
 
-        let message = message.take();
-        *self = Self::Unused;
-        debug!(
-          channel = debug(sink as *const _),
-          send_msg = debug(&message)
-        );
+          let message = message.take();
+          *self = Self::Unused;
+          debug!(
+            channel = debug(sink as *const _),
+            send_msg = debug(&message)
+          );
 
-        if let Some(message) = message {
-          sink.start_send_unpin(message)?;
-          *self = Self::Flush;
-        }
-        Ok(())
-      },
-      Self::Flush => {
-        trace!(channel = debug(sink as *const _), msg = "flushing");
-        match sink.poll_flush_unpin(ctx) {
-          Poll::Pending => Ok(()),
-          Poll::Ready(Ok(())) => {
-            *self = Self::Unused;
-            Ok(())
-          },
-          Poll::Ready(Err(err)) => {
-            *self = Self::Unused;
-            Err(err)
-          },
-        }
-      },
+          if let Some(message) = message {
+            sink.start_send_unpin(message)?;
+            *self = Self::Flush;
+          }
+        },
+        Self::Flush => {
+          trace!(channel = debug(sink as *const _), msg = "flushing");
+          match sink.poll_flush_unpin(ctx) {
+            Poll::Pending => break Ok(()),
+            Poll::Ready(Ok(())) => {
+              *self = Self::Unused;
+            },
+            Poll::Ready(Err(err)) => {
+              *self = Self::Unused;
+              break Err(err)
+            },
+          }
+        },
+      }
     }
   }
 
