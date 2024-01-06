@@ -403,12 +403,11 @@ where
               // registered that we received a message above.
             },
             WebSocketMessage::Close(_) => {
-              // We just ignore close messages. From our perspective
-              // they serve no purpose, because the stream already has a
-              // notion of "exhausted" with `Poll::Ready(None)`. The
-              // only value-add they provide is the optional close
-              // frame, but we don't intend to use it or expose it to
-              // clients.
+              // Once we received a close message from the remote, we
+              // can safely stop anything we've been doing. We do not
+              // expose those to higher layers and instead just indicate
+              // stream exhaustion.
+              break Poll::Ready(None)
             },
             WebSocketMessage::Frame(_) => {
               // We should never receive such a value while reading
