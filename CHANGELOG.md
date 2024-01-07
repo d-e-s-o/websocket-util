@@ -1,5 +1,5 @@
-Unreleased
-----------
+0.12.0
+------
 - Removed pong sending functionality from `Wrapper` type
 - Bumped minimum supported Rust version to `1.63`
 - Bumped `tokio-tungstenite` dependency to `0.20`
