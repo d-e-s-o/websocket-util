@@ -1,3 +1,8 @@
+Unreleased
+----------
+- Bumped `tokio-tungstenite` dependency to `0.21`
+
+
 0.12.0
 ------
 - Removed pong sending functionality from `Wrapper` type
