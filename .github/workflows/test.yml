@@ -69,7 +69,7 @@ jobs:
     - name: Test and gather coverage
       run: cargo llvm-cov --all-targets --lcov --output-path lcov.info --ignore-filename-regex=/dev/null -- --include-ignored
     - name: Upload code coverage results
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@v5
       env:
         CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       with:
