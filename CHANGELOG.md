@@ -1,6 +1,6 @@
 Unreleased
 ----------
-- Bumped `tokio-tungstenite` dependency to `0.24`
+- Bumped `tokio-tungstenite` dependency to `0.26`
 
 
 0.13.0
