@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2023 Daniel Mueller <deso@posteo.net>
+// Copyright (C) 2019-2024 Daniel Mueller <deso@posteo.net>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::fmt::Debug;
@@ -171,7 +171,7 @@ struct DebugMessage<'m> {
   message: &'m WebSocketMessage,
 }
 
-impl<'m> Debug for DebugMessage<'m> {
+impl Debug for DebugMessage<'_> {
   fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
     match self.message {
       // We could consider also attempting to decode the data passed to
