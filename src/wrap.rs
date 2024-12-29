@@ -754,6 +754,13 @@ mod tests {
         vec
       }
 
+      fn random_str() -> String {
+        let len = (0..32).choose(&mut thread_rng()).unwrap();
+        let mut string = String::new();
+        string.extend((0..len).map(|_| thread_rng().gen::<char>()));
+        string
+      }
+
       for _ in 0..50000 {
         let message = match (0..5).choose(&mut thread_rng()).unwrap() {
           0 => WebSocketMessage::Pong(random_buf()),
@@ -766,11 +773,7 @@ mod tests {
           // the connection.
           i => {
             if i & 0x1 == 0 {
-              let len = (0..32).choose(&mut thread_rng()).unwrap();
-              let mut string = String::new();
-              string.extend((0..len).map(|_| thread_rng().gen::<char>()));
-
-              WebSocketMessage::Text(string)
+              WebSocketMessage::Text(random_str())
             } else {
               WebSocketMessage::Binary(random_buf())
             }
